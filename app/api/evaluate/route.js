@@ -12,14 +12,38 @@ export async function POST(request) {
 Employees must build an AI-powered tool that solves a real problem. Output must be an HTML file.
 
 Return ONLY valid JSON — no markdown, no extra text:
-{"intent":"full|partial|none","intent_reason":"1 sentence","prompt":"full|partial|none","prompt_reason":"1 sentence","html":"full|partial|none","html_reason":"1 sentence","overall":"good|review|fail","summary":"1-2 sentences","action":"what they should fix if not good, or empty string if good"}
+{"intent":"full|partial|none","intent_reason":"1 sentence","prompt":"full|partial|none","prompt_reason":"1 sentence","html":"full|partial|none","html_reason":"1 sentence","overall":"good|review|fail","summary":"1-2 sentences","action":"specific fix instructions or empty if good"}
 
-SCORING:
-intent: full=specific problem+why it matters clearly stated; partial=vague; none=no problem or all placeholders/links
-prompt: full=shows iteration/numbered steps/multi-turn refinement or 200+ meaningful chars; partial=some effort <200 chars; none="-" or single line or just a URL
-html: full=HTML on Google Drive OR real deployed URL (not chatgpt/claude.ai share link); partial=local file path or chat share link; none=nothing
-overall: good=2+ full and ≤1 none; review=1+ full but not good; fail=2+ none or prompt is "-"/link only
-action: if overall is "review" or "fail", give 1-2 specific actionable sentences on what to fix/resubmit. If "good", leave empty.
+SCORING CRITERIA:
+
+1. intent (Clear Intent):
+- "full" = clearly states a SPECIFIC problem AND explains why it matters or how it impacts their work
+- "partial" = problem is mentioned but vague, generic, or lacks context on why it matters
+- "none" = no problem stated, or all fields contain only links/placeholders
+
+2. prompt (Multi-Conversation Prompt):
+- "full" = shows clear iteration: numbered steps, multiple exchanges, refinements, OR a single detailed prompt of 300+ meaningful chars
+- "partial" = some effort but minimal — short single prompt under 300 chars, or light iteration without refinement
+- "none" = just "-", a single word/line, a URL only, or empty
+
+3. html (Working HTML):
+- "full" = HTML file on Google Drive OR real deployed URL (vercel, github.io, railway, streamlit, script.google.com, netlify, etc.)
+- "partial" = local file:// path, or deployed link is just a claude.ai/chatgpt share link
+- "none" = no HTML file and no deployed link at all
+
+OVERALL VERDICT:
+- "good" = 2+ "full" AND zero "none"
+- "review" = at least 1 "full" but doesn't qualify for good — person clearly tried, something real exists but has gaps
+- "fail" = html is "none" AND (prompt is "none" OR intent is "none") — critical components missing; OR all 3 are "none"
+
+KEY DISTINCTION:
+- "review" = built something real, needs improvement
+- "fail" = critical components missing, not enough to evaluate
+
+action field:
+- "good": empty string
+- "review": 1-2 sentences on what specifically to improve, resubmit by 1 June 2026
+- "fail": 1-2 sentences on what critical items are missing, must submit by 1 June 2026
 
 SUBMISSION:
 Tool: ${s.tool_name}
