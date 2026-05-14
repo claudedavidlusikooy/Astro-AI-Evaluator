@@ -6,11 +6,10 @@ const MASCOT_BOXING = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACAAAAAgACAY
 
 const BRAND = {
   navy:'#1B2B6B', blue:'#2B5CE6', lightBlue:'#5BB3F0',
-  red:'#E63329', bgLight:'#F0F5FF', bgPage:'#EEF3FB',
-  border:'#D0DCF5', textMuted:'#6B7BAD',
+  bgLight:'#F0F5FF', bgPage:'#EEF3FB', border:'#D0DCF5', textMuted:'#6B7BAD',
 }
 const AUTH = { username:'Astro.People', password:'@People2026' }
-const STORAGE_KEY = 'astro_eval_resubmit_v5'
+const STORAGE_KEY = 'astro_eval_resubmit_v6'
 
 function calcVerdict(r) {
   if (!r) return 'pending'
@@ -18,54 +17,50 @@ function calcVerdict(r) {
   const nones = [r.intent,r.prompt,r.html].filter(s=>s==='none').length
   return (fulls>=2 && nones===0) ? 'qualified' : 'not_qualified'
 }
-
 const VERDICT_STYLE = {
-  qualified:     { bg:'#dcfce7', color:'#15803d', label:'✅ Qualified' },
-  not_qualified: { bg:'#fee2e2', color:'#991b1b', label:'🔄 Not Qualified' },
-  pending:       { bg:'#f1f5f9', color:'#64748b', label:'Pending' },
+  qualified:     {bg:'#dcfce7',color:'#15803d',label:'✅ Qualified'},
+  not_qualified: {bg:'#fee2e2',color:'#991b1b',label:'🔄 Not Qualified'},
+  pending:       {bg:'#f1f5f9',color:'#64748b',label:'Pending'},
 }
-function VerdictBadge({ verdict }) {
-  const v = VERDICT_STYLE[verdict]||VERDICT_STYLE.pending
-  return <span style={{ display:'inline-block', padding:'4px 10px', borderRadius:12, fontSize:11, fontWeight:700, whiteSpace:'nowrap', background:v.bg, color:v.color }}>{v.label}</span>
+function VerdictBadge({verdict}){
+  const v=VERDICT_STYLE[verdict]||VERDICT_STYLE.pending
+  return <span style={{display:'inline-block',padding:'4px 10px',borderRadius:12,fontSize:11,fontWeight:700,whiteSpace:'nowrap',background:v.bg,color:v.color}}>{v.label}</span>
 }
-
-function looksLikeLinkOnly(val) {
-  if (!val) return false
-  const t = val.trim()
-  return t.startsWith('http') && !t.includes(' ') && t.length < 400
+function looksLikeLinkOnly(val){
+  if(!val)return false; const t=val.trim()
+  return t.startsWith('http')&&!t.includes(' ')&&t.length<400
 }
 
-async function loadXLSX() { return await import('xlsx') }
-async function parseXLSXFile(file) {
-  const XLSX = await loadXLSX()
-  const buf = await file.arrayBuffer()
-  const wb = XLSX.read(buf,{type:'array'})
-  const ws = wb.Sheets[wb.SheetNames[0]]
-  const rows = XLSX.utils.sheet_to_json(ws,{defval:''})
-  return { rows, headers: rows.length ? Object.keys(rows[0]) : [] }
+// ── File utils ─────────────────────────────────────────────
+async function loadXLSX(){return await import('xlsx')}
+async function parseXLSXFile(file){
+  const XLSX=await loadXLSX(); const buf=await file.arrayBuffer()
+  const wb=XLSX.read(buf,{type:'array'}); const ws=wb.Sheets[wb.SheetNames[0]]
+  const rows=XLSX.utils.sheet_to_json(ws,{defval:''})
+  return {rows,headers:rows.length?Object.keys(rows[0]):[]}
 }
-function parseCSVText(txt) {
+function parseCSVText(txt){
   const rows=[]; let line=[],field='',inQ=false
-  for (let i=0;i<=txt.length;i++) {
+  for(let i=0;i<=txt.length;i++){
     const ch=txt[i]
-    if (i===txt.length||(ch==='\n'&&!inQ)) { line.push(field);field='';if(line.some(f=>f.trim()))rows.push(line);line=[] }
-    else if (ch==='"') { if(inQ&&txt[i+1]==='"'){field+='"';i++}else inQ=!inQ }
-    else if (ch===','&&!inQ) { line.push(field);field='' }
-    else if (ch!=='\r') field+=ch
+    if(i===txt.length||(ch==='\n'&&!inQ)){line.push(field);field='';if(line.some(f=>f.trim()))rows.push(line);line=[]}
+    else if(ch==='"'){if(inQ&&txt[i+1]==='"'){field+='"';i++}else inQ=!inQ}
+    else if(ch===','&&!inQ){line.push(field);field=''}
+    else if(ch!=='\r')field+=ch
   }
-  if (!rows.length) return []
+  if(!rows.length)return[]
   const hdrs=rows[0].map(h=>h.trim())
   return rows.slice(1).map(r=>{const o={};hdrs.forEach((h,i)=>o[h]=(r[i]||'').trim());return o})
 }
-function pick(row,...keys) {
-  for (const k of keys) {
+function pick(row,...keys){
+  for(const k of keys){
     const found=Object.keys(row).find(h=>h.toLowerCase().includes(k.toLowerCase()))
-    if (found!==undefined&&row[found]!==undefined&&String(row[found]).trim()!=='') return String(row[found]).trim()
+    if(found!==undefined&&row[found]!==undefined&&String(row[found]).trim()!=='')return String(row[found]).trim()
   }
   return ''
 }
-function mapRow(row) {
-  return {
+function mapRow(row){
+  return{
     _raw:row,
     email:pick(row,'email'),
     dept:pick(row,'function','team','dept','divisi'),
@@ -79,26 +74,18 @@ function mapRow(row) {
     deployed:pick(row,'deployed','share your ai submission link'),
   }
 }
-function hasHtmlFile(s) {
-  const h=s.html_file||''
-  return h.length>4&&(h.includes('drive.google')||(h.startsWith('http')&&!h.includes('chatgpt')&&!h.includes('claude.ai')))
-}
-function hasDeployedLink(s) {
-  const d=s.deployed||''
-  return d.length>3&&d!=='-'&&d.startsWith('http')&&!d.startsWith('file://')&&!['chatgpt.com','suno.com','play.google','claude.ai'].some(x=>d.includes(x))
-}
-function getName(email) {
-  return (email||'').split('@')[0].split('.').map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join(' ')
-}
+function hasHtmlFile(s){const h=s.html_file||'';return h.length>4&&(h.includes('drive.google')||(h.startsWith('http')&&!h.includes('chatgpt')&&!h.includes('claude.ai')))}
+function hasDeployedLink(s){const d=s.deployed||'';return d.length>3&&d!=='-'&&d.startsWith('http')&&!d.startsWith('file://')&&!['chatgpt.com','suno.com','play.google','claude.ai'].some(x=>d.includes(x))}
+function getName(email){return(email||'').split('@')[0].split('.').map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join(' ')}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 
-async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus) {
+async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus){
   const XLSX=await loadXLSX()
   const newCols=['Verdict','Resubmit Status','Intent Score','Prompt Score','HTML Score','AI Score','HTML Uploaded','Description Flag','Summary','Action Required']
   const headers=[...originalHeaders,...newCols]
   const data=subs.map((s,i)=>{
-    const r=results[i]; const verdict=calcVerdict(r); const orig=originalRows[i]||{}
-    const row={}; originalHeaders.forEach(h=>{row[h]=orig[h]!==undefined?orig[h]:''})
+    const r=results[i]; const verdict=calcVerdict(r); const orig=originalRows[i]||{}; const row={}
+    originalHeaders.forEach(h=>{row[h]=orig[h]!==undefined?orig[h]:''})
     row['Verdict']=verdict==='qualified'?'✅ Qualified':verdict==='not_qualified'?'🔄 Not Qualified':'Pending'
     row['Resubmit Status']=verdict==='not_qualified'?({pending:'⏳ Pending',resubmitted:'📬 Resubmitted',confirmed:'✅ Confirmed'}[resubmitStatus[i]||'pending']||'⏳ Pending'):'—'
     row['Intent Score']=r?r.intent:''; row['Prompt Score']=r?r.prompt:''; row['HTML Score']=r?r.html:''
@@ -115,59 +102,65 @@ async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitSt
   XLSX.writeFile(wb,'astro_ai_challenge_results.xlsx')
 }
 
-function makeGmailLink(s,r) {
+function makeGmailLink(s,r){
   const name=getName(s.email)
   const subject=`Astro Personal AI Challenge — Your Submission Needs Resubmission`
-  const body=`Hi ${name},\n\nThank you for participating in the Astro Personal AI Challenge! 🚀\n\nWe've reviewed your submission "${s.tool_name}" and it has been marked as: 🔄 Not Qualified\n\n📋 FEEDBACK\n${r?.summary||''}\n\n🔧 WHAT YOU NEED TO FIX\n${r?.action||''}\n\n📊 DETAILED SCORES\n• Clear Intent: ${r?.intent||'-'} — ${r?.intent_reason||''}\n• Multi-Conversation Prompt: ${r?.prompt||'-'} — ${r?.prompt_reason||''}\n• Working HTML/App: ${r?.html||'-'} — ${r?.html_reason||''}\n• AI Implementation: ${r?.ai_score||'-'}/5 — ${r?.ai_score_reason||''}\n\n📅 RESUBMISSION DEADLINE: 1 June 2026\nResubmit via: https://bit.ly/AstroPersonalAI\n\nQuestions? Reach out to the People Team or drop a message in #Random.\n\nBest,\nPeople Team · Astro Technologies`
+  const body=`Hi ${name},\n\nThank you for participating in the Astro Personal AI Challenge! 🚀\n\nWe've reviewed your submission "${s.tool_name}" and it has been marked as: 🔄 Not Qualified\n\n📋 FEEDBACK\n${r?.summary||''}\n\n🔧 WHAT YOU NEED TO FIX\n${r?.action||''}\n\n📊 DETAILED SCORES\n• Clear Intent: ${r?.intent||'-'} — ${r?.intent_reason||''}\n• Multi-Conversation Prompt: ${r?.prompt||'-'} — ${r?.prompt_reason||''}\n• Working HTML/App: ${r?.html||'-'} — ${r?.html_reason||''}\n• AI Implementation: ${r?.ai_score||'-'}/5 — ${r?.ai_score_reason||''}\n\n📅 RESUBMISSION DEADLINE: 1 June 2026\nResubmit via: https://bit.ly/AstroPersonalAI\n\nQuestions? Reach out to the People Team.\n\nBest,\nPeople Team · Astro Technologies`
   return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(s.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 }
 
-const SCORE_STYLE={full:{bg:'#dcfce7',color:'#166534',icon:'✓'},partial:{bg:'#fef3c7',color:'#854d0e',icon:'~'},none:{bg:'#fee2e2',color:'#991b1b',icon:'✗'}}
-function ScorePill({score,label}){const c=SCORE_STYLE[score]||SCORE_STYLE.none;return <span style={{display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:700,margin:1,background:c.bg,color:c.color}}>{c.icon} {label}</span>}
-function ScoreLabel({score}){const c=SCORE_STYLE[score]||SCORE_STYLE.none;const labels={full:'Fully Demonstrated',partial:'Partially Demonstrated',none:'Not Demonstrated'};return <span style={{display:'inline-block',padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:600,background:c.bg,color:c.color}}>{labels[score]||'—'}</span>}
-function StarScore({score}){const n=parseInt(score)||0;return <div style={{display:'flex',alignItems:'center',gap:2}}>{[1,2,3,4,5].map(i=><span key={i} style={{fontSize:13,color:i<=n?'#f59e0b':'#e2e8f0'}}>★</span>)}<span style={{fontSize:11,color:BRAND.textMuted,marginLeft:2}}>{n}/5</span></div>}
+// ── Score UI ───────────────────────────────────────────────
+const SS={full:{bg:'#dcfce7',color:'#166534',icon:'✓'},partial:{bg:'#fef3c7',color:'#854d0e',icon:'~'},none:{bg:'#fee2e2',color:'#991b1b',icon:'✗'}}
+function ScorePill({score,label}){const c=SS[score]||SS.none;return<span style={{display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:700,margin:1,background:c.bg,color:c.color}}>{c.icon} {label}</span>}
+function ScoreLabel({score}){const c=SS[score]||SS.none;const L={full:'Fully Demonstrated',partial:'Partially Demonstrated',none:'Not Demonstrated'};return<span style={{display:'inline-block',padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:600,background:c.bg,color:c.color}}>{L[score]||'—'}</span>}
+function StarScore({score}){const n=parseInt(score)||0;return<div style={{display:'flex',alignItems:'center',gap:2}}>{[1,2,3,4,5].map(i=><span key={i} style={{fontSize:13,color:i<=n?'#f59e0b':'#e2e8f0'}}>★</span>)}<span style={{fontSize:11,color:BRAND.textMuted,marginLeft:2}}>{n}/5</span></div>}
 
-function SphereLoader({current,total}){
+// ── Sphere Loader ──────────────────────────────────────────
+function SphereLoader({current,total,label}){
   const pct=total?Math.round(current/total*100):0
   return(
     <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'48px 0',gap:24}}>
-      <style>{`@keyframes rotateSphere{from{transform:rotateY(0deg) rotateX(15deg)}to{transform:rotateY(360deg) rotateX(15deg)}}@keyframes orbit1{from{transform:rotateZ(0deg) translateX(54px)}to{transform:rotateZ(360deg) translateX(54px)}}@keyframes orbit2{from{transform:rotateZ(120deg) translateX(54px)}to{transform:rotateZ(480deg) translateX(54px)}}@keyframes orbit3{from{transform:rotateZ(240deg) translateX(54px)}to{transform:rotateZ(600deg) translateX(54px)}}@keyframes scanline{0%{top:15%}100%{top:85%}}@keyframes glowPulse{0%,100%{box-shadow:0 0 30px rgba(43,92,230,0.4)}50%{box-shadow:0 0 60px rgba(91,179,240,0.8)}}`}</style>
+      <style>{`@keyframes rS{from{transform:rotateY(0deg) rotateX(15deg)}to{transform:rotateY(360deg) rotateX(15deg)}}@keyframes o1{from{transform:rotateZ(0deg) translateX(54px)}to{transform:rotateZ(360deg) translateX(54px)}}@keyframes o2{from{transform:rotateZ(120deg) translateX(54px)}to{transform:rotateZ(480deg) translateX(54px)}}@keyframes o3{from{transform:rotateZ(240deg) translateX(54px)}to{transform:rotateZ(600deg) translateX(54px)}}@keyframes sl{0%{top:15%}100%{top:85%}}@keyframes gP{0%,100%{box-shadow:0 0 30px rgba(43,92,230,0.4)}50%{box-shadow:0 0 60px rgba(91,179,240,0.8)}}`}</style>
       <div style={{position:'relative',width:120,height:120}}>
-        <div style={{position:'absolute',inset:0,borderRadius:'50%',background:`radial-gradient(circle at 35% 35%, #7DE8F5, ${BRAND.blue} 50%, ${BRAND.navy})`,animation:'rotateSphere 3s linear infinite, glowPulse 2s ease-in-out infinite'}}></div>
-        <div style={{position:'absolute',left:'12%',right:'12%',height:1.5,background:'rgba(125,232,245,0.7)',animation:'scanline 1.5s ease-in-out infinite alternate',borderRadius:1}}></div>
-        {['orbit1','orbit2','orbit3'].map((a,i)=><div key={i} style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}><div style={{width:8,height:8,borderRadius:'50%',background:'#7DE8F5',boxShadow:'0 0 10px #5BB3F0',animation:`${a} ${1.2+i*0.3}s linear infinite`}}></div></div>)}
-        <div style={{position:'absolute',inset:-10,borderRadius:'50%',border:'1.5px solid rgba(91,179,240,0.2)',animation:'rotateSphere 5s linear infinite reverse'}}></div>
+        <div style={{position:'absolute',inset:0,borderRadius:'50%',background:`radial-gradient(circle at 35% 35%, #7DE8F5, ${BRAND.blue} 50%, ${BRAND.navy})`,animation:'rS 3s linear infinite, gP 2s ease-in-out infinite'}}></div>
+        <div style={{position:'absolute',left:'12%',right:'12%',height:1.5,background:'rgba(125,232,245,0.7)',animation:'sl 1.5s ease-in-out infinite alternate',borderRadius:1}}></div>
+        {['o1','o2','o3'].map((a,i)=><div key={i} style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}><div style={{width:8,height:8,borderRadius:'50%',background:'#7DE8F5',boxShadow:'0 0 10px #5BB3F0',animation:`${a} ${1.2+i*0.3}s linear infinite`}}></div></div>)}
+        <div style={{position:'absolute',inset:-10,borderRadius:'50%',border:'1.5px solid rgba(91,179,240,0.2)',animation:'rS 5s linear infinite reverse'}}></div>
       </div>
       <div style={{textAlign:'center'}}>
-        <div style={{fontSize:15,fontWeight:700,color:BRAND.navy,marginBottom:4}}>AI is analyzing submissions…</div>
-        <div style={{fontSize:12,color:BRAND.textMuted}}>{current} of {total} processed</div>
+        <div style={{fontSize:15,fontWeight:700,color:BRAND.navy,marginBottom:4}}>{label||'AI is analyzing submissions…'}</div>
+        {total>0&&<div style={{fontSize:12,color:BRAND.textMuted}}>{current} of {total} processed</div>}
       </div>
-      <div style={{width:240,background:BRAND.border,borderRadius:10,height:6}}>
-        <div style={{background:`linear-gradient(90deg, ${BRAND.lightBlue}, ${BRAND.blue})`,borderRadius:10,height:6,width:`${pct}%`,transition:'width 0.4s ease',boxShadow:`0 0 8px ${BRAND.lightBlue}`}}></div>
-      </div>
-      <div style={{fontSize:14,fontWeight:800,color:BRAND.blue}}>{pct}%</div>
+      {total>0&&<>
+        <div style={{width:240,background:BRAND.border,borderRadius:10,height:6}}>
+          <div style={{background:`linear-gradient(90deg, ${BRAND.lightBlue}, ${BRAND.blue})`,borderRadius:10,height:6,width:`${pct}%`,transition:'width 0.4s ease',boxShadow:`0 0 8px ${BRAND.lightBlue}`}}></div>
+        </div>
+        <div style={{fontSize:14,fontWeight:800,color:BRAND.blue}}>{pct}%</div>
+      </>}
     </div>
   )
 }
 
+// ── Rocket ─────────────────────────────────────────────────
 function RocketTransition({onDone}){
   useEffect(()=>{const t=setTimeout(onDone,2800);return()=>clearTimeout(t)},[onDone])
   return(
     <div style={{position:'fixed',inset:0,background:`linear-gradient(135deg, ${BRAND.navy} 0%, ${BRAND.blue} 60%, ${BRAND.lightBlue} 100%)`,zIndex:9999,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
-      <style>{`@keyframes rocketLaunch{0%{transform:translateY(60px) scale(0.7);opacity:0}30%{opacity:1;transform:translateY(0) scale(1)}70%{transform:translateY(-20px) scale(1.05);opacity:1}100%{transform:translateY(-140px) scale(0.5);opacity:0}}@keyframes starFloat{0%{opacity:0;transform:translateY(0) scale(0)}50%{opacity:1}100%{opacity:0;transform:translateY(-80px) scale(1.5)}}@keyframes brandReveal{0%{opacity:0;transform:scale(0.8) translateY(20px)}60%{opacity:1;transform:scale(1.05) translateY(0)}100%{opacity:1;transform:scale(1) translateY(0)}}@keyframes glowText{0%,100%{text-shadow:0 0 20px rgba(125,232,245,0.5)}50%{text-shadow:0 0 50px rgba(125,232,245,1),0 0 100px rgba(43,92,230,0.8)}}@keyframes trail{0%{opacity:0.9;height:60px}100%{opacity:0;height:10px}}`}</style>
-      {[...Array(20)].map((_,i)=><div key={i} style={{position:'absolute',width:2+Math.random()*4,height:2+Math.random()*4,borderRadius:'50%',background:'white',left:`${Math.random()*100}%`,top:`${Math.random()*100}%`,animation:`starFloat ${1+Math.random()*2}s ease-out ${Math.random()*1.5}s infinite`,opacity:0}}></div>)}
-      <div style={{animation:'rocketLaunch 2.5s ease-in-out forwards',display:'flex',flexDirection:'column',alignItems:'center'}}>
+      <style>{`@keyframes rL{0%{transform:translateY(60px) scale(0.7);opacity:0}30%{opacity:1;transform:translateY(0) scale(1)}70%{transform:translateY(-20px) scale(1.05);opacity:1}100%{transform:translateY(-140px) scale(0.5);opacity:0}}@keyframes sF{0%{opacity:0;transform:translateY(0) scale(0)}50%{opacity:1}100%{opacity:0;transform:translateY(-80px) scale(1.5)}}@keyframes bR{0%{opacity:0;transform:scale(0.8) translateY(20px)}60%{opacity:1;transform:scale(1.05) translateY(0)}100%{opacity:1;transform:scale(1) translateY(0)}}@keyframes gT{0%,100%{text-shadow:0 0 20px rgba(125,232,245,0.5)}50%{text-shadow:0 0 50px rgba(125,232,245,1),0 0 100px rgba(43,92,230,0.8)}}@keyframes tr{0%{opacity:0.9;height:60px}100%{opacity:0;height:10px}}`}</style>
+      {[...Array(20)].map((_,i)=><div key={i} style={{position:'absolute',width:2+Math.random()*4,height:2+Math.random()*4,borderRadius:'50%',background:'white',left:`${Math.random()*100}%`,top:`${Math.random()*100}%`,animation:`sF ${1+Math.random()*2}s ease-out ${Math.random()*1.5}s infinite`,opacity:0}}></div>)}
+      <div style={{animation:'rL 2.5s ease-in-out forwards',display:'flex',flexDirection:'column',alignItems:'center'}}>
         <img src={MASCOT_RUNNING} alt="" style={{width:150,filter:'drop-shadow(0 0 24px rgba(125,232,245,0.9))'}}/>
-        <div style={{width:4,animation:'trail 0.35s ease-out infinite alternate',background:'linear-gradient(to bottom, rgba(255,120,50,0.9), transparent)',borderRadius:2,marginTop:-4}}></div>
+        <div style={{width:4,animation:'tr 0.35s ease-out infinite alternate',background:'linear-gradient(to bottom, rgba(255,120,50,0.9), transparent)',borderRadius:2,marginTop:-4}}></div>
       </div>
-      <div style={{animation:'brandReveal 1s ease-out 0.6s both',textAlign:'center',marginTop:28}}>
-        <div style={{fontSize:44,fontWeight:900,color:'white',letterSpacing:8,animation:'glowText 1.5s ease-in-out 1s infinite'}}>ASTRO</div>
+      <div style={{animation:'bR 1s ease-out 0.6s both',textAlign:'center',marginTop:28}}>
+        <div style={{fontSize:44,fontWeight:900,color:'white',letterSpacing:8,animation:'gT 1.5s ease-in-out 1s infinite'}}>ASTRO</div>
         <div style={{fontSize:13,color:'rgba(255,255,255,0.7)',letterSpacing:5,textTransform:'uppercase',marginTop:4}}>Personal AI Challenge</div>
       </div>
     </div>
   )
 }
 
+// ── Legend ─────────────────────────────────────────────────
 function LegendCard(){
   const [open,setOpen]=useState(false)
   return(
@@ -178,24 +171,24 @@ function LegendCard(){
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:14}}>
             <div>
               <div style={{fontSize:12,fontWeight:800,color:BRAND.navy,marginBottom:10}}>Verdict</div>
-              <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                <div style={{display:'flex',alignItems:'flex-start',gap:10}}><span style={{background:'#dcfce7',color:'#15803d',fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:10,whiteSpace:'nowrap'}}>✅ Qualified</span><span style={{fontSize:12,color:'#555',lineHeight:1.4}}>2+ criteria Fully Demonstrated AND zero Not Demonstrated. No resubmission needed.</span></div>
-                <div style={{display:'flex',alignItems:'flex-start',gap:10}}><span style={{background:'#fee2e2',color:'#991b1b',fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:10,whiteSpace:'nowrap'}}>🔄 Not Qualified</span><span style={{fontSize:12,color:'#555',lineHeight:1.4}}>Does not meet the threshold. Must resubmit by 1 June 2026.</span></div>
-              </div>
+              {[['qualified','✅ Qualified','#dcfce7','#15803d','2+ criteria Fully Demonstrated AND zero Not Demonstrated. No resubmission needed.'],['not_qualified','🔄 Not Qualified','#fee2e2','#991b1b','Does not meet the threshold. Must resubmit by 1 June 2026.']].map(([k,lbl,bg,color,desc])=>(
+                <div key={k} style={{display:'flex',alignItems:'flex-start',gap:10,marginBottom:8}}>
+                  <span style={{background:bg,color,fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:10,whiteSpace:'nowrap'}}>{lbl}</span>
+                  <span style={{fontSize:12,color:'#555',lineHeight:1.4}}>{desc}</span>
+                </div>
+              ))}
             </div>
             <div>
               <div style={{fontSize:12,fontWeight:800,color:BRAND.navy,marginBottom:10}}>Criteria Scores</div>
-              <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                {[['full','All requirements met for this criterion'],['partial','Some evidence but incomplete'],['none','Missing or not submitted']].map(([k,desc])=>(
-                  <div key={k} style={{display:'flex',alignItems:'flex-start',gap:8}}><ScoreLabel score={k}/><span style={{fontSize:11,color:'#666',lineHeight:1.4}}>{desc}</span></div>
-                ))}
-              </div>
+              {[['full','All requirements met'],['partial','Some evidence but incomplete'],['none','Missing or not submitted']].map(([k,desc])=>(
+                <div key={k} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}><ScoreLabel score={k}/><span style={{fontSize:11,color:'#666'}}>{desc}</span></div>
+              ))}
             </div>
           </div>
           <div style={{borderTop:`1px solid ${BRAND.border}`,paddingTop:14,marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:800,color:BRAND.navy,marginBottom:8}}>3 Evaluation Criteria</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
-              {[['1. Clear Intent','Clearly states the problem and why it matters'],['2. Multi-Conversation Prompt','Shows iteration, back-and-forth, or detailed prompting process'],['3. Working HTML / App','HTML file uploaded OR a live deployed app link']].map(([t,d])=>(
+              {[['1. Clear Intent','Clearly states the problem and why it matters'],['2. Multi-Conversation Prompt','Shows iteration, back-and-forth, or detailed prompting'],['3. Working HTML / App','HTML file uploaded OR a live deployed app link']].map(([t,d])=>(
                 <div key={t} style={{background:BRAND.bgLight,borderRadius:8,padding:'10px 12px'}}><div style={{fontSize:11,fontWeight:700,color:BRAND.navy,marginBottom:4}}>{t}</div><div style={{fontSize:11,color:BRAND.textMuted,lineHeight:1.4}}>{d}</div></div>
               ))}
             </div>
@@ -203,8 +196,8 @@ function LegendCard(){
           <div style={{borderTop:`1px solid ${BRAND.border}`,paddingTop:14}}>
             <div style={{fontSize:12,fontWeight:800,color:BRAND.navy,marginBottom:8}}>AI Implementation Score (★)</div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8}}>
-              {[['★','1','AI barely used'],['★★','2','Simple single prompt'],['★★★','3','AI used properly'],['★★★★','4','Good iteration, functional'],['★★★★★','5','Complex AI, production quality']].map(([stars,n,desc])=>(
-                <div key={n} style={{background:BRAND.bgLight,borderRadius:8,padding:'8px 10px',textAlign:'center'}}><div style={{fontSize:13,color:'#f59e0b'}}>{stars}</div><div style={{fontSize:10,color:'#555',lineHeight:1.3,marginTop:4}}>{desc}</div></div>
+              {[['★','1','AI barely used'],['★★','2','Simple single prompt'],['★★★','3','AI used properly'],['★★★★','4','Good iteration'],['★★★★★','5','Complex + production quality']].map(([s,n,d])=>(
+                <div key={n} style={{background:BRAND.bgLight,borderRadius:8,padding:'8px 10px',textAlign:'center'}}><div style={{fontSize:13,color:'#f59e0b'}}>{s}</div><div style={{fontSize:10,color:'#555',lineHeight:1.3,marginTop:4}}>{d}</div></div>
               ))}
             </div>
           </div>
@@ -214,184 +207,106 @@ function LegendCard(){
   )
 }
 
-// ── AI Insights Tab ────────────────────────────────────────
-function InsightsTab({subs, results}) {
-  const [insightData, setInsightData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+// ── Insights Tab ───────────────────────────────────────────
+function InsightsTab({subs,results,insightData,setInsightData}){
+  const [loading,setLoading]=useState(false)
+  const [error,setError]=useState('')
+  const evaluatedCount=results.filter(r=>r).length
 
-  const evaluatedCount = results.filter(r=>r).length
-
-  async function generateInsights() {
-    if (evaluatedCount === 0) { setError('Please evaluate submissions first before generating insights.'); return }
-    setLoading(true); setError('')
-
-    // Build summary data per function
-    const byFunction = {}
-    subs.forEach((s,i) => {
-      const r = results[i]
-      if (!r) return
-      const fn = s.dept || 'Unknown'
-      if (!byFunction[fn]) byFunction[fn] = []
-      byFunction[fn].push({
-        name: getName(s.email),
-        tool: s.tool_name,
-        purpose: s.purpose,
-        verdict: calcVerdict(r),
-        intent: r.intent, prompt: r.prompt, html: r.html,
-        ai_score: r.ai_score,
-        summary: r.summary,
-        problem: s.problem?.substring(0,200),
-      })
+  async function generateInsights(){
+    if(evaluatedCount===0){setError('Please evaluate submissions first.');return}
+    setLoading(true);setError('')
+    const byFunction={}
+    subs.forEach((s,i)=>{
+      const r=results[i]; if(!r)return
+      const fn=s.dept||'Unknown'
+      if(!byFunction[fn])byFunction[fn]=[]
+      byFunction[fn].push({name:getName(s.email),tool:s.tool_name,verdict:calcVerdict(r),ai_score:r.ai_score||0,summary:(r.summary||'').substring(0,120)})
     })
+    const allScores=results.filter(r=>r).map(r=>r.ai_score||0)
+    const avgAI=allScores.length?(allScores.reduce((a,b)=>a+b,0)/allScores.length).toFixed(1):0
+    const qualifiedCount=results.filter(r=>calcVerdict(r)==='qualified').length
+    const totalEval=results.filter(r=>r).length
 
-    const allScores = results.filter(r=>r).map(r=>r.ai_score||0)
-    const avgAI = allScores.length ? (allScores.reduce((a,b)=>a+b,0)/allScores.length).toFixed(1) : 0
-    const qualifiedCount = results.filter(r=>calcVerdict(r)==='qualified').length
-    const totalEval = results.filter(r=>r).length
+    const prompt=`You are an AI L&D analyst reviewing Astro Technologies' Personal AI Challenge results.
 
-    const prompt = `You are an AI learning & development analyst reviewing the results of Astro Technologies' first-ever Personal AI Challenge.
+${totalEval} employees submitted AI tools. Stats:
+- Qualified: ${qualifiedCount}/${totalEval} (${Math.round(qualifiedCount/totalEval*100)}%)
+- Avg AI Score: ${avgAI}/5
 
-${totalEval} employees submitted AI-powered tools. Here is the data:
-
-OVERALL STATS:
-- Total evaluated: ${totalEval}
-- Qualified: ${qualifiedCount} (${Math.round(qualifiedCount/totalEval*100)}%)
-- Not Qualified: ${totalEval-qualifiedCount}
-- Average AI Implementation Score: ${avgAI}/5
-
-SUBMISSIONS BY FUNCTION:
-${Object.entries(byFunction).map(([fn, items]) => {
-  const avgScore = (items.reduce((a,b)=>a+(b.ai_score||0),0)/items.length).toFixed(1)
-  const qualified = items.filter(x=>x.verdict==='qualified').length
-  return `\n${fn} (${items.length} submissions, ${qualified} qualified, avg AI score: ${avgScore}/5):\n${items.map(x=>`  - ${x.name}: "${x.tool}" — ${x.summary||'no summary'}`).join('\n')}`
+By Function:
+${Object.entries(byFunction).map(([fn,items])=>{
+  const avg=(items.reduce((a,b)=>a+(b.ai_score||0),0)/items.length).toFixed(1)
+  const q=items.filter(x=>x.verdict==='qualified').length
+  return `${fn} (${items.length} subs, ${q} qualified, avg ${avg}/5): ${items.map(x=>`${x.name}="${x.tool}"`).join(', ')}`
 }).join('\n')}
 
-Based on this data, provide a structured analysis in JSON format:
-{
-  "company_summary": "3-4 sentences about overall AI adoption level, what the company is doing well, and general patterns observed",
-  "company_strengths": ["strength 1", "strength 2", "strength 3"],
-  "company_gaps": ["gap 1", "gap 2", "gap 3"],
-  "company_recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
-  "overall_ai_maturity": "Beginner|Developing|Intermediate|Advanced",
-  "functions": [
-    {
-      "name": "function name",
-      "submission_count": 0,
-      "qualified_count": 0,
-      "avg_ai_score": 0.0,
-      "summary": "2-3 sentences about this function's AI usage patterns and level",
-      "strengths": ["strength"],
-      "gaps": ["gap"],
-      "recommendations": ["recommendation 1", "recommendation 2"]
-    }
-  ]
-}
+Return ONLY valid JSON. Keep ALL text fields under 120 characters each. Arrays max 3 items each:
+{"company_summary":"short 2 sentence summary","company_strengths":["s1","s2","s3"],"company_gaps":["g1","g2","g3"],"company_recommendations":["r1","r2","r3"],"overall_ai_maturity":"Beginner|Developing|Intermediate|Advanced","functions":[{"name":"fn","submission_count":0,"qualified_count":0,"avg_ai_score":0.0,"summary":"short summary under 120 chars","strengths":["s1","s2"],"recommendations":["r1","r2"]}]}`
 
-Be specific, actionable, and honest. Reference actual tools and patterns you see.`
-
-    try {
-      const resp = await fetch('/api/evaluate', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ submission: null, insightPrompt: prompt })
-      })
-      const data = await resp.json()
-      if (data.error) throw new Error(data.error)
+    try{
+      const resp=await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({insightPrompt:prompt})})
+      const data=await resp.json()
+      if(data.error)throw new Error(data.error)
       setInsightData(data.result)
-    } catch(e) {
-      setError('Error generating insights: ' + e.message)
-    }
+    }catch(e){setError('Error: '+e.message)}
     setLoading(false)
   }
 
-  const MATURITY_COLORS = {
-    'Beginner':     { bg:'#fee2e2', color:'#991b1b' },
-    'Developing':   { bg:'#fef3c7', color:'#854d0e' },
-    'Intermediate': { bg:'#dbeafe', color:'#1e40af' },
-    'Advanced':     { bg:'#dcfce7', color:'#15803d' },
-  }
+  const MC={'Beginner':{bg:'#fee2e2',color:'#991b1b'},'Developing':{bg:'#fef3c7',color:'#854d0e'},'Intermediate':{bg:'#dbeafe',color:'#1e40af'},'Advanced':{bg:'#dcfce7',color:'#15803d'}}
 
-  return (
-    <div style={{padding:'0 28px 40px'}}>
+  return(
+    <div style={{padding:'16px 28px 40px'}}>
       <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'24px 28px',marginBottom:20,boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
           <div>
             <h2 style={{fontSize:18,fontWeight:800,color:BRAND.navy,margin:0,marginBottom:4}}>AI Adoption Insights</h2>
-            <p style={{fontSize:13,color:BRAND.textMuted,margin:0}}>{evaluatedCount > 0 ? `Based on ${evaluatedCount} evaluated submissions` : 'Evaluate submissions first to generate insights'}</p>
+            <p style={{fontSize:13,color:BRAND.textMuted,margin:0}}>{evaluatedCount>0?`Based on ${evaluatedCount} evaluated submissions`:'Evaluate submissions first to generate insights'}</p>
           </div>
           <button onClick={generateInsights} disabled={loading||evaluatedCount===0}
             style={{background:loading||evaluatedCount===0?BRAND.border:`linear-gradient(135deg, ${BRAND.navy}, ${BRAND.blue})`,color:loading||evaluatedCount===0?BRAND.textMuted:'white',border:'none',borderRadius:10,padding:'10px 22px',fontSize:13,fontWeight:800,cursor:loading||evaluatedCount===0?'not-allowed':'pointer',whiteSpace:'nowrap'}}>
-            {loading ? '⏳ Generating…' : insightData ? '↺ Regenerate Insights' : '✨ Generate AI Insights'}
+            {loading?'⏳ Generating…':insightData?'↺ Regenerate':'✨ Generate AI Insights'}
           </button>
         </div>
-        {error && <div style={{background:'#fee2e2',color:'#991b1b',fontSize:12,padding:'8px 12px',borderRadius:8,marginTop:12,fontWeight:600}}>{error}</div>}
+        {error&&<div style={{background:'#fee2e2',color:'#991b1b',fontSize:12,padding:'8px 12px',borderRadius:8,marginTop:12,fontWeight:600}}>{error}</div>}
       </div>
 
-      {loading && (
-        <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
-          <SphereLoader current={1} total={1}/>
-        </div>
-      )}
+      {loading&&<div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}><SphereLoader current={0} total={0} label="Generating insights…"/></div>}
 
-      {insightData && !loading && (
+      {insightData&&!loading&&(
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
-          {/* Company Overview */}
           <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'24px 28px',boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
-            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16}}>
+            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:14}}>
               <h3 style={{fontSize:16,fontWeight:800,color:BRAND.navy,margin:0}}>🏢 Company-Wide AI Maturity</h3>
-              {insightData.overall_ai_maturity && (
-                <span style={{padding:'4px 12px',borderRadius:12,fontSize:12,fontWeight:700,...(MATURITY_COLORS[insightData.overall_ai_maturity]||{bg:'#f1f5f9',color:'#64748b'})}}>
-                  {insightData.overall_ai_maturity}
-                </span>
-              )}
+              {insightData.overall_ai_maturity&&<span style={{padding:'4px 12px',borderRadius:12,fontSize:12,fontWeight:700,...(MC[insightData.overall_ai_maturity]||{bg:'#f1f5f9',color:'#64748b'})}}>{insightData.overall_ai_maturity}</span>}
             </div>
             <p style={{fontSize:13,color:'#444',lineHeight:1.7,marginBottom:16}}>{insightData.company_summary}</p>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14}}>
               {[['💪 Strengths',insightData.company_strengths,'#dcfce7','#166534'],['🔍 Gaps',insightData.company_gaps,'#fef3c7','#854d0e'],['🚀 Recommendations',insightData.company_recommendations,'#dbeafe','#1e40af']].map(([title,items,bg,color])=>(
                 <div key={title} style={{background:bg,borderRadius:10,padding:'14px 16px'}}>
                   <div style={{fontSize:12,fontWeight:800,color,marginBottom:8}}>{title}</div>
-                  {(items||[]).map((item,idx)=>(
-                    <div key={idx} style={{fontSize:12,color:'#444',lineHeight:1.5,marginBottom:6,paddingLeft:8,borderLeft:`2px solid ${color}33`}}>{item}</div>
-                  ))}
+                  {(items||[]).map((item,idx)=><div key={idx} style={{fontSize:12,color:'#444',lineHeight:1.5,marginBottom:6,paddingLeft:8,borderLeft:`2px solid ${color}55`}}>{item}</div>)}
                 </div>
               ))}
             </div>
           </div>
-
-          {/* Per Function */}
           <div>
             <h3 style={{fontSize:15,fontWeight:800,color:BRAND.navy,marginBottom:12}}>📊 Breakdown by Function</h3>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
               {(insightData.functions||[]).map(fn=>{
-                const avgScore = parseFloat(fn.avg_ai_score)||0
-                const qPct = fn.submission_count ? Math.round(fn.qualified_count/fn.submission_count*100) : 0
+                const avgScore=parseFloat(fn.avg_ai_score)||0
+                const qPct=fn.submission_count?Math.round(fn.qualified_count/fn.submission_count*100):0
                 return(
                   <div key={fn.name} style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:12,padding:'18px 20px',boxShadow:'0 1px 4px rgba(27,43,107,0.06)'}}>
-                    <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:10}}>
-                      <div>
-                        <div style={{fontSize:14,fontWeight:800,color:BRAND.navy}}>{fn.name}</div>
-                        <div style={{fontSize:11,color:BRAND.textMuted,marginTop:2}}>{fn.submission_count} submissions · {fn.qualified_count} qualified ({qPct}%)</div>
-                      </div>
-                      <div style={{textAlign:'right'}}>
-                        <div style={{display:'flex',gap:1}}>{[1,2,3,4,5].map(i=><span key={i} style={{fontSize:12,color:i<=Math.round(avgScore)?'#f59e0b':'#e2e8f0'}}>★</span>)}</div>
-                        <div style={{fontSize:10,color:BRAND.textMuted}}>{fn.avg_ai_score}/5 avg</div>
-                      </div>
+                    <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:8}}>
+                      <div><div style={{fontSize:14,fontWeight:800,color:BRAND.navy}}>{fn.name}</div><div style={{fontSize:11,color:BRAND.textMuted,marginTop:2}}>{fn.submission_count} submissions · {fn.qualified_count} qualified ({qPct}%)</div></div>
+                      <div style={{textAlign:'right'}}><div style={{display:'flex',gap:1}}>{[1,2,3,4,5].map(i=><span key={i} style={{fontSize:12,color:i<=Math.round(avgScore)?'#f59e0b':'#e2e8f0'}}>★</span>)}</div><div style={{fontSize:10,color:BRAND.textMuted}}>{fn.avg_ai_score}/5 avg</div></div>
                     </div>
-                    {/* Qualified bar */}
-                    <div style={{background:'#f1f5f9',borderRadius:6,height:4,marginBottom:10}}>
-                      <div style={{background:`linear-gradient(90deg, #16a34a, #22c55e)`,borderRadius:6,height:4,width:`${qPct}%`,transition:'width 0.5s'}}></div>
-                    </div>
+                    <div style={{background:'#f1f5f9',borderRadius:6,height:4,marginBottom:10}}><div style={{background:'linear-gradient(90deg, #16a34a, #22c55e)',borderRadius:6,height:4,width:`${qPct}%`}}></div></div>
                     <p style={{fontSize:12,color:'#555',lineHeight:1.5,marginBottom:10}}>{fn.summary}</p>
                     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                      <div style={{background:'#f0fdf4',borderRadius:8,padding:'8px 10px'}}>
-                        <div style={{fontSize:10,fontWeight:700,color:'#15803d',marginBottom:4}}>💪 Strengths</div>
-                        {(fn.strengths||[]).map((s,idx)=><div key={idx} style={{fontSize:11,color:'#444',lineHeight:1.4,marginBottom:3}}>• {s}</div>)}
-                      </div>
-                      <div style={{background:'#fefce8',borderRadius:8,padding:'8px 10px'}}>
-                        <div style={{fontSize:10,fontWeight:700,color:'#854d0e',marginBottom:4}}>🚀 Recommendations</div>
-                        {(fn.recommendations||[]).map((s,idx)=><div key={idx} style={{fontSize:11,color:'#444',lineHeight:1.4,marginBottom:3}}>• {s}</div>)}
-                      </div>
+                      <div style={{background:'#f0fdf4',borderRadius:8,padding:'8px 10px'}}><div style={{fontSize:10,fontWeight:700,color:'#15803d',marginBottom:4}}>💪 Strengths</div>{(fn.strengths||[]).map((s,idx)=><div key={idx} style={{fontSize:11,color:'#444',lineHeight:1.4,marginBottom:3}}>• {s}</div>)}</div>
+                      <div style={{background:'#fefce8',borderRadius:8,padding:'8px 10px'}}><div style={{fontSize:10,fontWeight:700,color:'#854d0e',marginBottom:4}}>🚀 Next Steps</div>{(fn.recommendations||[]).map((s,idx)=><div key={idx} style={{fontSize:11,color:'#444',lineHeight:1.4,marginBottom:3}}>• {s}</div>)}</div>
                     </div>
                   </div>
                 )
@@ -405,120 +320,112 @@ Be specific, actionable, and honest. Reference actual tools and patterns you see
 }
 
 // ── Main ───────────────────────────────────────────────────
-export default function Home() {
-  const [screen, setScreen] = useState('login')
-  const [showRocket, setShowRocket] = useState(false)
-  const [loginUser, setLoginUser] = useState('')
-  const [loginPass, setLoginPass] = useState('')
-  const [loginError, setLoginError] = useState('')
-  const [fileData, setFileData] = useState(null)
-  const [fileName, setFileName] = useState('')
-  const [subs, setSubs] = useState([])
-  const [results, setResults] = useState([])
-  const [originalRows, setOriginalRows] = useState([])
-  const [originalHeaders, setOriginalHeaders] = useState([])
-  const [filter, setFilter] = useState('all')
-  const [search, setSearch] = useState('')
-  const [drag, setDrag] = useState(false)
-  const [running, setRunning] = useState(false)
-  const [progress, setProgress] = useState({done:0,total:0})
-  const [expanded, setExpanded] = useState({})
-  const [resubmitStatus, setResubmitStatus] = useState({})
-  const [activeTab, setActiveTab] = useState('submissions') // 'submissions' | 'insights'
-  const [expandedSummary, setExpandedSummary] = useState({})
-  const fileRef = useRef()
+export default function Home(){
+  const [screen,setScreen]=useState('login')
+  const [showRocket,setShowRocket]=useState(false)
+  const [loginUser,setLoginUser]=useState('')
+  const [loginPass,setLoginPass]=useState('')
+  const [loginError,setLoginError]=useState('')
+  const [fileData,setFileData]=useState(null)
+  const [fileName,setFileName]=useState('')
+  const [subs,setSubs]=useState([])
+  const [results,setResults]=useState([])
+  const [originalRows,setOriginalRows]=useState([])
+  const [originalHeaders,setOriginalHeaders]=useState([])
+  const [filter,setFilter]=useState('all')
+  const [search,setSearch]=useState('')
+  const [drag,setDrag]=useState(false)
+  const [running,setRunning]=useState(false)
+  const [progress,setProgress]=useState({done:0,total:0})
+  const [expanded,setExpanded]=useState({})
+  const [expandedSummary,setExpandedSummary]=useState({})
+  const [resubmitStatus,setResubmitStatus]=useState({})
+  const [activeTab,setActiveTab]=useState('submissions')
+  const [insightData,setInsightData]=useState(null) // persisted in parent
+  const fileRef=useRef()
 
-  useEffect(()=>{ try{const s=localStorage.getItem(STORAGE_KEY);if(s)setResubmitStatus(JSON.parse(s))}catch(e){} },[])
+  useEffect(()=>{try{const s=localStorage.getItem(STORAGE_KEY);if(s)setResubmitStatus(JSON.parse(s))}catch(e){}},[])
 
-  function setResubmit(idx,status) {
-    setResubmitStatus(prev=>{
-      const next={...prev,[idx]:status}
-      try{localStorage.setItem(STORAGE_KEY,JSON.stringify(next))}catch(e){}
-      return next
-    })
+  function setResubmit(idx,status){
+    setResubmitStatus(prev=>{const next={...prev,[idx]:status};try{localStorage.setItem(STORAGE_KEY,JSON.stringify(next))}catch(e){}; return next})
   }
 
-  function doLogin(e) {
+  function doLogin(e){
     e.preventDefault()
-    if (loginUser.trim()===AUTH.username&&loginPass===AUTH.password) { setLoginError('');setShowRocket(true) }
+    if(loginUser.trim()===AUTH.username&&loginPass===AUTH.password){setLoginError('');setShowRocket(true)}
     else setLoginError('Incorrect username or password.')
   }
 
-  function doLogout() {
-    setScreen('login'); setLoginUser(''); setLoginPass('')
-    setSubs([]); setResults([]); setFileData(null); setFileName('')
-    setExpanded({}); setActiveTab('submissions')
+  function doLogout(){
+    setScreen('login');setLoginUser('');setLoginPass('')
+    setSubs([]);setResults([]);setFileData(null);setFileName('')
+    setExpanded({});setInsightData(null);setActiveTab('submissions')
   }
 
-  async function handleFile(file) {
-    if (!file) return
+  async function handleFile(file){
+    if(!file)return
     const ext=file.name.split('.').pop().toLowerCase()
-    if (!['csv','xlsx','xls'].includes(ext)){alert('Please upload .xlsx, .xls, or .csv');return}
-    try {
+    if(!['csv','xlsx','xls'].includes(ext)){alert('Please upload .xlsx, .xls, or .csv');return}
+    try{
       let rows,headers
-      if (ext==='csv'){const text=await file.text();rows=parseCSVText(text);headers=rows.length?Object.keys(rows[0]):[]}
+      if(ext==='csv'){const text=await file.text();rows=parseCSVText(text);headers=rows.length?Object.keys(rows[0]):[]}
       else{const p=await parseXLSXFile(file);rows=p.rows;headers=p.headers}
       setFileData({rows,headers});setFileName(file.name)
-    } catch(e){alert('Error reading file: '+e.message)}
+    }catch(e){alert('Error reading file: '+e.message)}
   }
 
-  function loadData() {
-    if (!fileData) return
-    const {rows,headers}=fileData
+  function loadData(){
+    if(!fileData)return
+    const{rows,headers}=fileData
     const mapped=rows.map(mapRow).filter(s=>s.email&&s.tool_name)
     const rawRows=rows.filter(r=>pick(r,'email')&&pick(r,'tool name','tool_name','nama tool','nama aplikasi'))
     setSubs(mapped);setOriginalRows(rawRows);setOriginalHeaders(headers)
     setResults(new Array(mapped.length).fill(null))
-    setExpanded({});setScreen('main')
+    setExpanded({});setInsightData(null);setScreen('main')
   }
 
-  async function runEval() {
-    if (running) return
+  async function runEval(){
+    if(running)return
     setRunning(true)
     const newRes=new Array(subs.length).fill(null)
     setResults([...newRes])
     let done=0
-    for (let i=0;i<subs.length;i+=3) {
+    for(let i=0;i<subs.length;i+=3){
       const batch=subs.slice(i,Math.min(i+3,subs.length))
       await Promise.all(batch.map(async(s,bi)=>{
         const idx=i+bi
-        try {
+        try{
           const resp=await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submission:s})})
           const data=await resp.json()
-          if (data.error) throw new Error(data.error)
+          if(data.error)throw new Error(data.error)
           newRes[idx]=data.result
-        } catch(e) {
+        }catch(e){
           newRes[idx]={intent:'none',intent_reason:'Error',prompt:'none',prompt_reason:'Error',html:'none',html_reason:'Error',overall:'fail',summary:'Evaluation error: '+e.message,action:'',ai_score:0,ai_score_reason:'Error'}
         }
         done++;setProgress({done,total:subs.length});setResults([...newRes])
       }))
-      if (i+3<subs.length) await sleep(300)
+      if(i+3<subs.length)await sleep(300)
     }
     setRunning(false)
   }
 
-  const counts=subs.reduce((acc,_,i)=>{
-    const v=calcVerdict(results[i]);acc[v]=(acc[v]||0)+1;return acc
-  },{qualified:0,not_qualified:0,pending:0})
-
+  const counts=subs.reduce((acc,_,i)=>{const v=calcVerdict(results[i]);acc[v]=(acc[v]||0)+1;return acc},{qualified:0,not_qualified:0,pending:0})
   const visible=subs.filter((s,i)=>{
     const v=calcVerdict(results[i])
-    if (filter!=='all'&&v!==filter) return false
-    if (search) return (getName(s.email)+s.email+s.dept+s.tool_name).toLowerCase().includes(search.toLowerCase())
+    if(filter!=='all'&&v!==filter)return false
+    if(search)return(getName(s.email)+s.email+s.dept+s.tool_name).toLowerCase().includes(search.toLowerCase())
     return true
   })
 
   // ── Login ─────────────────────────────────────────────────
-  if (showRocket) return <RocketTransition onDone={()=>{setShowRocket(false);setScreen('upload')}}/>
+  if(showRocket)return<RocketTransition onDone={()=>{setShowRocket(false);setScreen('upload')}}/>
 
-  if (screen==='login') return(
+  if(screen==='login')return(
     <div style={{minHeight:'100vh',background:`linear-gradient(135deg, ${BRAND.navy} 0%, ${BRAND.blue} 60%, ${BRAND.lightBlue} 100%)`,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',position:'relative',overflow:'hidden'}}>
       <style>{`@keyframes floatUp{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}@keyframes twinkle{0%,100%{opacity:0.2}50%{opacity:0.9}}`}</style>
       {[...Array(14)].map((_,i)=><div key={i} style={{position:'absolute',width:2+Math.random()*3,height:2+Math.random()*3,borderRadius:'50%',background:'rgba(255,255,255,0.7)',left:`${Math.random()*100}%`,top:`${Math.random()*100}%`,animation:`twinkle ${2+Math.random()*3}s ease-in-out ${Math.random()*2}s infinite`}}></div>)}
       <div style={{display:'flex',alignItems:'flex-end',gap:40,maxWidth:820,width:'100%',padding:'0 24px'}}>
-        <div style={{flexShrink:0,animation:'floatUp 3s ease-in-out infinite'}}>
-          <img src={MASCOT_RUNNING} alt="Astro" style={{width:200,filter:'drop-shadow(0 8px 24px rgba(0,0,0,0.35))'}}/>
-        </div>
+        <div style={{flexShrink:0,animation:'floatUp 3s ease-in-out infinite'}}><img src={MASCOT_RUNNING} alt="Astro" style={{width:200,filter:'drop-shadow(0 8px 24px rgba(0,0,0,0.35))'}}/></div>
         <div style={{flex:1,background:'white',borderRadius:20,padding:'40px',boxShadow:'0 24px 64px rgba(0,0,0,0.25)'}}>
           <div style={{fontSize:11,fontWeight:700,color:BRAND.textMuted,textTransform:'uppercase',letterSpacing:2,marginBottom:8}}>People Team Portal</div>
           <h1 style={{fontSize:24,fontWeight:900,color:BRAND.navy,margin:'0 0 4px'}}>Personal AI Challenge</h1>
@@ -542,14 +449,14 @@ export default function Home() {
   )
 
   // ── Upload ────────────────────────────────────────────────
-  if (screen==='upload') return(
+  if(screen==='upload')return(
     <div style={{minHeight:'100vh',background:BRAND.bgPage,fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'}}>
       <div style={{background:`linear-gradient(135deg, ${BRAND.navy} 0%, ${BRAND.blue} 100%)`,padding:'16px 32px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <img src={MASCOT_BOXING} alt="" style={{width:40,height:40,objectFit:'contain'}}/>
           <div><div style={{color:'white',fontWeight:800,fontSize:15}}>Personal AI Challenge</div><div style={{color:'rgba(255,255,255,0.6)',fontSize:11}}>Submission Evaluator · People Team</div></div>
         </div>
-        <button onClick={doLogout} style={{background:'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.2)',color:'white',borderRadius:8,padding:'6px 14px',fontSize:12,cursor:'pointer'}}>Sign Out</button>
+        <button onClick={doLogout} style={{background:'rgba(255,100,80,0.25)',border:'1px solid rgba(255,100,80,0.4)',color:'white',borderRadius:8,padding:'6px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>Sign Out</button>
       </div>
       <div style={{maxWidth:560,margin:'60px auto',padding:'0 24px'}}>
         <div style={{background:'white',borderRadius:16,border:`1px solid ${BRAND.border}`,padding:36,boxShadow:'0 4px 24px rgba(27,43,107,0.08)'}}>
@@ -583,19 +490,16 @@ export default function Home() {
       <div style={{background:`linear-gradient(135deg, ${BRAND.navy} 0%, ${BRAND.blue} 100%)`,padding:'14px 28px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <img src={MASCOT_BOXING} alt="" style={{width:38,height:38,objectFit:'contain'}}/>
-          <div>
-            <div style={{color:'white',fontWeight:800,fontSize:15}}>Personal AI Challenge · Evaluator</div>
-            <div style={{color:'rgba(255,255,255,0.6)',fontSize:11}}>{subs.length} submissions loaded</div>
-          </div>
+          <div><div style={{color:'white',fontWeight:800,fontSize:15}}>Personal AI Challenge · Evaluator</div><div style={{color:'rgba(255,255,255,0.6)',fontSize:11}}>{subs.length} submissions loaded</div></div>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
           {activeTab==='submissions'&&<>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, function…"
-              style={{border:'1.5px solid rgba(255,255,255,0.35)',borderRadius:8,padding:'7px 12px',fontSize:12,outline:'none',width:210,background:'rgba(255,255,255,0.18)',color:'white'}}/>
+              style={{border:'1.5px solid rgba(255,255,255,0.5)',borderRadius:8,padding:'7px 12px',fontSize:12,outline:'none',width:210,background:'rgba(255,255,255,0.2)',color:'white',colorScheme:'dark'}}/>
             <button onClick={()=>exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus)} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>⬇ Export Excel</button>
             <button onClick={()=>setScreen('upload')} style={{background:'rgba(255,255,255,0.1)',border:'1px solid rgba(255,255,255,0.2)',color:'white',borderRadius:8,padding:'7px 12px',fontSize:12,cursor:'pointer'}}>↩ Change File</button>
           </>}
-          <button onClick={doLogout} style={{background:'rgba(255,100,80,0.25)',border:'1px solid rgba(255,100,80,0.4)',color:'white',borderRadius:8,padding:'7px 12px',fontSize:12,cursor:'pointer',fontWeight:600}}>Sign Out</button>
+          <button onClick={doLogout} style={{background:'rgba(220,50,50,0.3)',border:'1px solid rgba(255,100,80,0.5)',color:'white',borderRadius:8,padding:'7px 12px',fontSize:12,cursor:'pointer',fontWeight:600}}>Sign Out</button>
         </div>
       </div>
 
@@ -617,7 +521,7 @@ export default function Home() {
       </div>
 
       {/* Tabs */}
-      <div style={{padding:'0 28px',display:'flex',gap:4,borderBottom:`1px solid ${BRAND.border}`}}>
+      <div style={{padding:'0 28px',display:'flex',gap:4,borderBottom:`1px solid ${BRAND.border}`,background:'white'}}>
         {[{val:'submissions',label:'📋 Submissions'},{val:'insights',label:'✨ AI Insights'}].map(t=>(
           <button key={t.val} onClick={()=>setActiveTab(t.val)}
             style={{padding:'10px 20px',border:'none',borderBottom:`3px solid ${activeTab===t.val?BRAND.blue:'transparent'}`,background:'none',color:activeTab===t.val?BRAND.blue:BRAND.textMuted,fontWeight:activeTab===t.val?700:400,fontSize:13,cursor:'pointer',transition:'all 0.15s'}}>
@@ -626,15 +530,15 @@ export default function Home() {
         ))}
       </div>
 
-      {/* Sphere loader */}
-      {running&&activeTab==='submissions'&&(
-        <div style={{margin:'0 28px 16px',background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,boxShadow:'0 2px 12px rgba(27,43,107,0.08)'}}>
+      {/* Sphere loader — always visible at top when running */}
+      {running&&(
+        <div style={{margin:'16px 28px 0',background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,boxShadow:'0 2px 12px rgba(27,43,107,0.08)'}}>
           <SphereLoader current={progress.done} total={progress.total}/>
         </div>
       )}
 
       {/* Insights Tab */}
-      {activeTab==='insights'&&<InsightsTab subs={subs} results={results}/>}
+      {activeTab==='insights'&&<InsightsTab subs={subs} results={results} insightData={insightData} setInsightData={setInsightData}/>}
 
       {/* Submissions Tab */}
       {activeTab==='submissions'&&(
@@ -659,18 +563,11 @@ export default function Home() {
               {visible.length===0&&<tr><td colSpan={11} style={{textAlign:'center',padding:40,color:BRAND.textMuted,fontSize:13}}>No submissions match this filter.</td></tr>}
               {visible.map(s=>{
                 const i=subs.indexOf(s)
-                const r=results[i]
-                const verdict=calcVerdict(r)
-                const isExp=expanded[i]
-                const isSumExp=expandedSummary[i]
-                const name=getName(s.email)
-                const htmlUp=hasHtmlFile(s)
-                const deployed=hasDeployedLink(s)
-                const probIsLink=looksLikeLinkOnly(s.problem)
-                const howIsLink=looksLikeLinkOnly(s.how)
+                const r=results[i]; const verdict=calcVerdict(r); const isExp=expanded[i]; const isSumExp=expandedSummary[i]
+                const name=getName(s.email); const htmlUp=hasHtmlFile(s); const deployed=hasDeployedLink(s)
+                const probIsLink=looksLikeLinkOnly(s.problem); const howIsLink=looksLikeLinkOnly(s.how)
                 const rsStatus=resubmitStatus[i]||'pending'
-                const summaryText=r?.summary||''
-                const summaryShort=summaryText.length>80?summaryText.substring(0,80)+'…':summaryText
+                const summaryText=r?.summary||''; const summaryShort=summaryText.length>90?summaryText.substring(0,90)+'…':summaryText
 
                 return [
                   <tr key={`r${i}`} style={{cursor:'pointer',borderBottom:`1px solid ${BRAND.border}`}} onClick={()=>setExpanded(p=>({...p,[i]:!p[i]}))}>
@@ -679,31 +576,26 @@ export default function Home() {
                       <div style={{fontWeight:600,color:BRAND.navy,maxWidth:110,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>
                       <div style={{color:BRAND.textMuted,fontSize:11,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.email}</div>
                     </td>
-                    <td style={{padding:'10px 13px',fontSize:12,color:BRAND.textMuted,whiteSpace:'nowrap',maxWidth:120,overflow:'hidden',textOverflow:'ellipsis'}}>{s.dept||'—'}</td>
+                    <td style={{padding:'10px 13px',fontSize:11,color:BRAND.textMuted,maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.dept||'—'}</td>
                     <td style={{padding:'10px 13px'}}>
                       <span style={{background:BRAND.bgLight,color:BRAND.textMuted,fontSize:10,padding:'3px 8px',borderRadius:10,fontWeight:600,border:`1px solid ${BRAND.border}`,whiteSpace:'nowrap'}}>{s.purpose||'—'}</span>
                     </td>
-                    <td style={{padding:'10px 13px',maxWidth:180}}>
-                      <div style={{fontWeight:700,color:BRAND.navy,fontSize:12,marginBottom:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:180}}>{s.tool_name}</div>
+                    <td style={{padding:'10px 13px',maxWidth:200}}>
+                      <div style={{fontWeight:700,color:BRAND.navy,fontSize:12,marginBottom:3,maxWidth:190,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.tool_name}</div>
                       {summaryText&&(
                         <div style={{fontSize:11,color:'#666',lineHeight:1.4}}>
                           {isSumExp?summaryText:summaryShort}
-                          {summaryText.length>80&&(
-                            <button onClick={e=>{e.stopPropagation();setExpandedSummary(p=>({...p,[i]:!p[i]}))}} style={{background:'none',border:'none',color:BRAND.blue,fontSize:10,cursor:'pointer',padding:'0 0 0 4px',fontWeight:600}}>
-                              {isSumExp?'less':'more'}
-                            </button>
-                          )}
+                          {summaryText.length>90&&<button onClick={e=>{e.stopPropagation();setExpandedSummary(p=>({...p,[i]:!p[i]}))}} style={{background:'none',border:'none',color:BRAND.blue,fontSize:10,cursor:'pointer',padding:'0 0 0 4px',fontWeight:600}}>{isSumExp?'less':'more'}</button>}
                         </div>
                       )}
                       {(probIsLink||howIsLink)&&<span style={{fontSize:10,color:'#0369a1',background:'#e0f2fe',padding:'1px 6px',borderRadius:6,fontWeight:600,display:'inline-block',marginTop:3}}>🔗 Description Missing</span>}
                     </td>
-                    <td style={{padding:'10px 13px'}}>
+                    <td style={{padding:'10px 13px',minWidth:110}}>
                       <div style={{display:'flex',flexDirection:'column',gap:3}}>
                         {htmlUp
-                          ?<a href={s.html_file} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:11,color:BRAND.blue,fontWeight:600}}>📁 HTML File</a>
+                          ?<a href={s.html_file} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:11,color:BRAND.blue,fontWeight:600,whiteSpace:'nowrap'}}>📁 HTML File</a>
                           :<span style={{fontSize:10,color:'#b45309',background:'#fef3c7',padding:'1px 6px',borderRadius:6,fontWeight:600,whiteSpace:'nowrap'}}>⚠️ No HTML Upload</span>}
-                        {deployed&&<a href={s.deployed} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:11,color:'#16a34a',fontWeight:600}}>🚀 Live App</a>}
-                        {!htmlUp&&!deployed&&(probIsLink||howIsLink)&&<span style={{fontSize:10,color:'#0369a1',background:'#e0f2fe',padding:'1px 6px',borderRadius:6,fontWeight:600,whiteSpace:'nowrap'}}>📋 See Doc</span>}
+                        {deployed&&<a href={s.deployed} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:11,color:'#16a34a',fontWeight:600,whiteSpace:'nowrap'}}>🚀 Live App</a>}
                       </div>
                     </td>
                     <td style={{padding:'10px 13px'}}><VerdictBadge verdict={verdict}/></td>
@@ -712,33 +604,32 @@ export default function Home() {
                     </td>
                     <td style={{padding:'10px 13px'}}>{r?<StarScore score={r.ai_score}/>:<span style={{color:'#ddd',fontSize:11}}>—</span>}</td>
                     <td style={{padding:'10px 13px'}} onClick={e=>e.stopPropagation()}>
-                      {verdict==='not_qualified'?(
-                        <select value={rsStatus} onChange={e=>setResubmit(i,e.target.value)}
-                          style={{fontSize:11,border:`1px solid ${BRAND.border}`,borderRadius:6,padding:'3px 6px',background:'white',color:BRAND.navy,cursor:'pointer'}}>
+                      {verdict==='not_qualified'
+                        ?<select value={rsStatus} onChange={e=>setResubmit(i,e.target.value)} style={{fontSize:11,border:`1px solid ${BRAND.border}`,borderRadius:6,padding:'3px 6px',background:'white',color:BRAND.navy,cursor:'pointer'}}>
                           <option value="pending">⏳ Pending</option>
                           <option value="resubmitted">📬 Resubmitted</option>
                           <option value="confirmed">✅ Confirmed</option>
                         </select>
-                      ):<span style={{fontSize:11,color:'#ccc'}}>—</span>}
+                        :<span style={{fontSize:11,color:'#ccc'}}>—</span>}
                     </td>
                     <td style={{padding:'10px 13px'}}><span style={{fontSize:11,color:BRAND.blue}}>{isExp?'▲':'▼'}</span></td>
                   </tr>,
                   isExp&&(
                     <tr key={`d${i}`}>
                       <td colSpan={11} style={{background:BRAND.bgLight,padding:'16px 16px 20px',borderBottom:`1px solid ${BRAND.border}`}}>
-                        {/* Tool description */}
+                        {/* What this tool does */}
                         <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px',marginBottom:10}}>
                           <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,fontWeight:700,marginBottom:6}}>What This Tool Does</div>
                           <div style={{fontSize:13,color:BRAND.navy,fontWeight:700,marginBottom:6}}>{s.tool_name}</div>
                           {r?.summary&&<div style={{fontSize:12,color:'#444',lineHeight:1.6,marginBottom:6}}>{r.summary}</div>}
                           {s.how&&!howIsLink&&<div style={{fontSize:12,color:'#666',lineHeight:1.5}}><strong>How it works:</strong> {s.how}</div>}
-                          {howIsLink&&<div style={{fontSize:12,color:'#0369a1'}}>🔗 How it works is in an <a href={s.how} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>external document</a> — manual review recommended.</div>}
+                          {howIsLink&&<div style={{fontSize:12,color:'#0369a1'}}>🔗 Description in <a href={s.how} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>external document</a> — manual review recommended.</div>}
                         </div>
                         {/* Problem */}
                         <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px',marginBottom:10}}>
                           <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,fontWeight:700,marginBottom:6}}>Problem Stated</div>
                           {probIsLink
-                            ?<div style={{fontSize:12,color:'#0369a1'}}>🔗 Problem description is in an <a href={s.problem} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>external document</a> — manual review recommended.</div>
+                            ?<div style={{fontSize:12,color:'#0369a1'}}>🔗 Problem description in <a href={s.problem} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>external document</a> — manual review recommended.</div>
                             :<div style={{fontSize:12,color:'#444',lineHeight:1.6}}>{s.problem||'—'}</div>}
                         </div>
                         {/* Scores */}
@@ -756,7 +647,7 @@ export default function Home() {
                             <div style={{fontSize:12,color:'#555',lineHeight:1.45,marginTop:6}}>{r?r.ai_score_reason:'—'}</div>
                           </div>
                         </div>
-                        {!htmlUp&&deployed&&<div style={{background:'#fffbeb',border:'1px solid #fed7aa',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#92400e',marginBottom:8}}><strong>⚠️ Note:</strong> No HTML file uploaded to Drive — scored based on deployed live app only.</div>}
+                        {!htmlUp&&deployed&&<div style={{background:'#fffbeb',border:'1px solid #fed7aa',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#92400e',marginBottom:8}}><strong>⚠️ Note:</strong> No HTML file on Drive — scored based on deployed live app only.</div>}
                         {r?.action&&verdict!=='qualified'&&<div style={{background:'#fff8ee',border:'1px solid #fed7aa',borderRadius:10,padding:'10px 14px',fontSize:12,color:'#92400e',lineHeight:1.5,marginBottom:8}}><strong>🔧 Action Required:</strong> {r.action}</div>}
                         <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',marginTop:8}}>
                           {htmlUp&&<a href={s.html_file} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📁 HTML File</a>}
