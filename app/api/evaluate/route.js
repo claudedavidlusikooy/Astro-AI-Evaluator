@@ -33,28 +33,24 @@ export async function POST(request) {
 
     const prompt = `You are evaluating a submission for Astro's Personal AI Challenge.
 Return ONLY valid JSON, no markdown, no preamble:
-{"intent":"full|partial|none","intent_reason":"1 sentence max 100 chars","prompt":"full|partial|none","prompt_reason":"1 sentence max 100 chars","html":"full|partial|none","html_reason":"1 sentence max 100 chars","summary":"2-3 sentences max 250 chars","action":"REQUIRED if not qualified - 1-2 sentences exactly what to fix, resubmit by 1 June 2026","ai_score":3,"ai_score_reason":"1 sentence max 100 chars"}
+{"intent":"full|partial|none","intent_reason":"1 sentence max 100 chars","prompt":"full|partial|none","prompt_reason":"1 sentence max 100 chars","html":"full|partial|none","html_reason":"1 sentence max 100 chars","summary":"2-3 sentences max 250 chars","action":"REQUIRED if not qualified","ai_score":3,"ai_score_reason":"1 sentence max 100 chars"}
 
 SCORING:
-intent: full=specific problem+why it matters; partial=vague/generic; none=no problem or URL only${probIsLink?' [FIELD IS URL ONLY - score none]':''}
-prompt: full=iteration/numbered steps/300+ meaningful chars; partial=some effort <300 chars; none="-"/URL/single line/empty
-html: full=Google Drive HTML OR real deployed URL (vercel/github.io/railway/streamlit/script.google.com/netlify) — DEPLOYED APP = FULL EVEN WITHOUT HTML UPLOAD; partial=local file:// or chat share link; none=nothing
+intent: full=specific problem+why it matters; partial=vague; none=no problem or URL only${probIsLink?' [FIELD IS URL — score none]':''}
+prompt: full=iteration/steps/300+ meaningful chars; partial=some effort<300; none="-"/URL/single line/empty
+html: full=Google Drive HTML OR real deployed URL (vercel/github.io/railway/streamlit/script.google.com/netlify) — DEPLOYED APP = FULL; partial=local file:// or chat share link; none=nothing
 
-QUALIFICATION RULE:
-- Qualified = 2+ "full" AND zero "none" → action MUST be empty string ""
-- Not Qualified = everything else → action MUST be specific non-empty fix instructions
-
-CRITICAL: If verdict is Not Qualified, action field MUST contain specific actionable instructions. Never leave action empty for Not Qualified submissions. Always tell them exactly what to improve and to resubmit by 1 June 2026 via https://bit.ly/AstroPersonalAI
-
-ai_score 1-5: 5=exceptional complex AI+production; 4=good iteration+deployed; 3=adequate; 2=simple prompt; 1=barely used
+QUALIFICATION: Qualified = 2+ "full" AND zero "none"
+action: empty "" if qualified; else specific fix instructions + "resubmit by 1 June 2026 via https://bit.ly/AstroPersonalAI"
+ai_score 1-5: 5=exceptional; 4=good iteration+deployed; 3=adequate; 2=simple prompt; 1=barely used
 
 SUBMISSION:
 Tool: ${s.tool_name}
 Purpose: ${s.purpose}
-Problem: ${probIsLink?`[URL ONLY: ${s.problem}]`:(s.problem||'').substring(0,300)}
-How it works: ${howIsLink?`[URL ONLY: ${s.how}]`:(s.how||'').substring(0,300)}
+Problem: ${probIsLink?`[URL: ${s.problem}]`:(s.problem||'').substring(0,300)}
+How: ${howIsLink?`[URL: ${s.how}]`:(s.how||'').substring(0,300)}
 Prompt: ${(s.prompt||'').substring(0,1200)}
-HTML file: ${hasHtmlFile?s.html_file:'NOT UPLOADED'}
+HTML: ${hasHtmlFile?s.html_file:'NOT UPLOADED'}
 Deployed: ${hasDeployed?s.deployed:'none'}`
 
     const msg = await client.messages.create({
@@ -68,16 +64,16 @@ Deployed: ${hasDeployed?s.deployed:'none'}`
     if (!jsonMatch) throw new Error('Invalid response format')
     const result = JSON.parse(jsonMatch[0])
 
-    // Safety net: enforce non-empty action for not_qualified
-    const fulls = [result.intent, result.prompt, result.html].filter(x=>x==='full').length
-    const nones = [result.intent, result.prompt, result.html].filter(x=>x==='none').length
-    const isQualified = fulls >= 2 && nones === 0
-    if (!isQualified && (!result.action || result.action.trim() === '')) {
-      const missing = []
-      if (result.intent !== 'full') missing.push('provide a clearer problem statement explaining why it matters')
-      if (result.prompt !== 'full') missing.push('show more detailed prompting with iteration and refinement')
-      if (result.html !== 'full') missing.push('upload your HTML file to Google Drive or deploy your app')
-      result.action = `Please ${missing.join(', and ')}. Resubmit by 1 June 2026 via https://bit.ly/AstroPersonalAI`
+    // Safety net: enforce action for not_qualified
+    const fulls = [result.intent,result.prompt,result.html].filter(x=>x==='full').length
+    const nones = [result.intent,result.prompt,result.html].filter(x=>x==='none').length
+    const isQualified = fulls>=2 && nones===0
+    if (!isQualified && (!result.action || result.action.trim()==='')) {
+      const missing=[]
+      if(result.intent!=='full') missing.push('provide a clearer problem statement')
+      if(result.prompt!=='full') missing.push('show detailed prompting with iteration')
+      if(result.html!=='full') missing.push('upload HTML to Drive or deploy your app')
+      result.action=`Please ${missing.join(', ')}. Resubmit by 1 June 2026 via https://bit.ly/AstroPersonalAI`
     }
 
     return Response.json({ result })
