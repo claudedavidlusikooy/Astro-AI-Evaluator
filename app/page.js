@@ -582,11 +582,9 @@ export default function Home(){
   }
 
   function doLogout(){
-    try{['_subs','_res','_hdrs','_fname'].forEach(k=>localStorage.removeItem(STORAGE_KEY+k))}catch(e){}
+    // Only clear auth state — keep data so next login restores dashboard
     setScreen('login');setLoginUser('');setLoginPass('')
-    setSubs([]);setResults([]);setFileData(null);setFileName('')
-    setOriginalHeaders([]);setOriginalRows([])
-    setExpanded({});setInsightData(null);setActiveTab('submissions');setModalIdx(null)
+    setExpanded({});setActiveTab('submissions');setModalIdx(null)
   }
 
   async function handleFile(file){
