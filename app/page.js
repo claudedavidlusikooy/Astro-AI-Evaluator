@@ -660,10 +660,10 @@ export default function Home(){
   async function runEval(evalAll=false){
     if(running)return
     setRunning(true)
-    // evalAll=true: re-evaluate everything; evalAll=false: only new/changed
     const newRes=evalAll?new Array(subs.length).fill(null):[...results]
+    // Evaluate ALL subs (including duplicates) so "other submissions" panel has scores
     const toEval=subs.map((s,i)=>({s,i,needsEval:!newRes[i]})).filter(x=>x.needsEval)
-    let done=newRes.filter(r=>r).length // start progress from already-done
+    let done=newRes.filter(r=>r).length
     setProgress({done,total:subs.length})
 
     for(let batch=0;batch<toEval.length;batch+=3){
@@ -692,16 +692,73 @@ export default function Home(){
     notQ.slice(0,count).forEach((s,idx)=>{const i=subs.indexOf(s);setTimeout(()=>window.open(makeGmailLink(s,results[i]),'_blank'),idx*350)})
   }
 
-  const counts=useMemo(()=>subs.reduce((acc,_,i)=>{const v=calcVerdict(results[i]);acc[v]=(acc[v]||0)+1;return acc},{qualified:0,not_qualified:0,pending:0}),[subs,results])
+  // ── Deduplication logic ────────────────────────────────────
+  // Group submissions by email, pick best per person
+  const dedupedData = useMemo(()=>{
+    // Group all subs by email
+    const byEmail = {}
+    subs.forEach((s,i)=>{
+      const email = s.email.toLowerCase()
+      if(!byEmail[email]) byEmail[email]=[]
+      byEmail[email].push({s,i,r:results[i]})
+    })
+
+    // For each email, pick the "primary" submission
+    // Priority: 1) Qualified, 2) most recent (highest index = latest in CSV)
+    const primaryIndexes = new Set()
+    const othersByPrimary = {} // primaryIdx -> [{s,i,r}]
+    const isResubmission = new Set() // indexes that are resubmissions
+
+    Object.values(byEmail).forEach(group=>{
+      if(group.length===1){
+        primaryIndexes.add(group[0].i)
+        return
+      }
+      // Sort: qualified first, then by index desc (most recent)
+      const sorted=[...group].sort((a,b)=>{
+        const av=calcVerdict(a.r); const bv=calcVerdict(b.r)
+        if(av==='qualified'&&bv!=='qualified')return -1
+        if(bv==='qualified'&&av!=='qualified')return 1
+        return b.i-a.i // most recent
+      })
+      const primary=sorted[0]
+      primaryIndexes.add(primary.i)
+      // Others = non-primary
+      const others=sorted.slice(1)
+      othersByPrimary[primary.i]=others
+      // Tag as resubmission if primary is newer AND any older one was not_qualified
+      const olderNotQual=others.some(x=>calcVerdict(x.r)==='not_qualified')
+      if(olderNotQual&&primary.i>Math.min(...others.map(x=>x.i))){
+        isResubmission.add(primary.i)
+      }
+    })
+
+    return{primaryIndexes,othersByPrimary,isResubmission,byEmail}
+  },[subs,results])
+
+  const{primaryIndexes,othersByPrimary,isResubmission}=dedupedData
+
+  // Counts based on unique submitters (primary only)
+  const counts=useMemo(()=>{
+    const c={qualified:0,not_qualified:0,pending:0}
+    primaryIndexes.forEach(i=>{
+      const v=calcVerdict(results[i])
+      c[v]=(c[v]||0)+1
+    })
+    return c
+  },[primaryIndexes,results])
+
+  const uniqueCount=primaryIndexes.size
 
   const visible=useMemo(()=>subs.filter((s,i)=>{
+    if(!primaryIndexes.has(i))return false // hide non-primary duplicates
     const v=calcVerdict(results[i])
     if(filter!=='all'&&v!==filter)return false
     if(search)return(getName(s.email)+s.email+s.dept+s.tool_name).toLowerCase().includes(search.toLowerCase())
     return true
-  }),[subs,results,filter,search])
+  }),[subs,results,filter,search,primaryIndexes])
 
-  const newCount=results.filter(r=>!r).length
+  const newCount=Array.from(primaryIndexes).filter(i=>!results[i]).length
 
   // ── Login ─────────────────────────────────────────────────
   if(showRocket)return<RocketTransition onDone={()=>{setShowRocket(false);setScreen('upload')}}/>
@@ -786,7 +843,7 @@ export default function Home(){
 
       {/* Header */}
       <div style={{background:`linear-gradient(135deg,${BRAND.navy} 0%,${BRAND.blue} 100%)`,padding:'14px 28px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
-        <div style={{display:'flex',alignItems:'center',gap:12}}><img src={MASCOT_BOXING} alt="" style={{width:38,height:38,objectFit:'contain'}}/><div><div style={{color:'white',fontWeight:800,fontSize:15}}>Personal AI Challenge · Evaluator</div><div style={{color:'rgba(255,255,255,0.6)',fontSize:11}}>{subs.length} submissions · {results.filter(r=>r).length} evaluated · {newCount} pending</div></div></div>
+        <div style={{display:'flex',alignItems:'center',gap:12}}><img src={MASCOT_BOXING} alt="" style={{width:38,height:38,objectFit:'contain'}}/><div><div style={{color:'white',fontWeight:800,fontSize:15}}>Personal AI Challenge · Evaluator</div><div style={{color:'rgba(255,255,255,0.6)',fontSize:11}}>{subs.length} submissions · {uniqueCount} unique · {results.filter(r=>r).length} evaluated</div></div></div>
         <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
           {activeTab==='submissions'&&<>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, function…"
@@ -802,10 +859,17 @@ export default function Home(){
 
       {/* Stats */}
       <div style={{display:'flex',gap:10,padding:'16px 28px',flexWrap:'wrap',alignItems:'center'}}>
-        {[{label:'Total',val:subs.length,color:BRAND.navy},{label:'Qualified ✅',val:counts.qualified||'—',color:'#16a34a'},{label:'Not Qualified 🔄',val:counts.not_qualified||'—',color:'#dc2626'},{label:'Pending ⏳',val:counts.pending||0,color:'#94a3b8'}].map(s=>(
+        {[
+          {label:'Total Submissions',val:subs.length,color:'#475569',sub:null},
+          {label:'Unique Submitters',val:uniqueCount,color:BRAND.navy,sub:subs.length>uniqueCount?`${subs.length-uniqueCount} duplicate${subs.length-uniqueCount>1?'s':''}`:null},
+          {label:'Qualified ✅',val:counts.qualified||'—',color:'#16a34a',sub:null},
+          {label:'Not Qualified 🔄',val:counts.not_qualified||'—',color:'#dc2626',sub:null},
+          {label:'Pending ⏳',val:counts.pending||0,color:'#94a3b8',sub:null},
+        ].map(s=>(
           <div key={s.label} style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:12,padding:'12px 18px',textAlign:'center',minWidth:105,boxShadow:'0 1px 4px rgba(27,43,107,0.06)'}}>
             <div style={{fontSize:24,fontWeight:800,color:s.color}}>{s.val}</div>
             <div style={{fontSize:10,color:BRAND.textMuted,textTransform:'uppercase',letterSpacing:0.4,marginTop:2}}>{s.label}</div>
+            {s.sub&&<div style={{fontSize:10,color:'#f59e0b',fontWeight:600,marginTop:2}}>{s.sub}</div>}
           </div>
         ))}
         <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10}}>
@@ -849,7 +913,7 @@ export default function Home(){
           <LegendCard/>
           <div style={{display:'flex',gap:7,alignItems:'center',flexWrap:'wrap',padding:'6px 0 10px'}}>
             <span style={{fontSize:12,color:BRAND.textMuted,marginRight:2}}>Filter:</span>
-            {[{val:'all',label:`All (${subs.length})`},{val:'qualified',label:`✅ Qualified (${counts.qualified||0})`},{val:'not_qualified',label:`🔄 Not Qualified (${counts.not_qualified||0})`},{val:'pending',label:`⏳ Pending (${counts.pending||0})`}].map(f=>(
+            {[{val:'all',label:`All (${uniqueCount} unique)`},{val:'qualified',label:`✅ Qualified (${counts.qualified||0})`},{val:'not_qualified',label:`🔄 Not Qualified (${counts.not_qualified||0})`},{val:'pending',label:`⏳ Pending (${counts.pending||0})`}].map(f=>(
               <button key={f.val} onClick={()=>setFilter(f.val)} style={{border:`1.5px solid ${filter===f.val?BRAND.blue:BRAND.border}`,background:filter===f.val?BRAND.blue:'white',padding:'5px 14px',borderRadius:20,fontSize:12,cursor:'pointer',color:filter===f.val?'white':BRAND.textMuted,fontWeight:filter===f.val?700:400}}>{f.label}</button>
             ))}
           </div>
@@ -867,10 +931,21 @@ export default function Home(){
                 const probIsLink=looksLikeLinkOnly(s.problem);const howIsLink=looksLikeLinkOnly(s.how)
                 const rsStatus=resubmitStatus[i]||'pending'
                 const summaryText=r?.summary||'';const summaryShort=summaryText.length>90?summaryText.substring(0,90)+'…':summaryText
+                const others=othersByPrimary[i]||[]
+                const isResub=isResubmission.has(i)
+                const othersExpKey=`others_${i}`
+                const isOthersExp=expanded[othersExpKey]
                 return[
                   <tr key={`r${i}`} style={{cursor:'pointer',borderBottom:`1px solid ${BRAND.border}`}} onClick={()=>setExpanded(p=>({...p,[i]:!p[i]}))}>
                     <td style={{padding:'10px 13px',color:'#ccc',fontSize:12}}>{i+1}</td>
-                    <td style={{padding:'10px 13px'}}><div style={{fontWeight:600,color:BRAND.navy,maxWidth:110,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div><div style={{color:BRAND.textMuted,fontSize:11,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.email}</div></td>
+                    <td style={{padding:'10px 13px'}}>
+                      <div style={{fontWeight:600,color:BRAND.navy,maxWidth:110,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>
+                      <div style={{color:BRAND.textMuted,fontSize:11,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.email}</div>
+                      <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:3}}>
+                        {isResub&&<span style={{fontSize:9,fontWeight:700,background:'#dbeafe',color:'#1e40af',padding:'1px 6px',borderRadius:6,whiteSpace:'nowrap'}}>🔄 Resubmission</span>}
+                        {others.length>0&&<span style={{fontSize:9,fontWeight:700,background:'#f1f5f9',color:'#64748b',padding:'1px 6px',borderRadius:6,whiteSpace:'nowrap'}}>+{others.length} more</span>}
+                      </div>
+                    </td>
                     <td style={{padding:'10px 13px',fontSize:11,color:BRAND.textMuted,maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.dept||'—'}</td>
                     <td style={{padding:'10px 13px'}}><span style={{background:BRAND.bgLight,color:BRAND.textMuted,fontSize:10,padding:'3px 8px',borderRadius:10,fontWeight:600,border:`1px solid ${BRAND.border}`,whiteSpace:'nowrap'}}>{s.purpose||'—'}</span></td>
                     <td style={{padding:'10px 13px',maxWidth:200}}>
@@ -922,12 +997,49 @@ export default function Home(){
                         </div>
                         {!htmlUp&&deployed&&<div style={{background:'#fffbeb',border:'1px solid #fed7aa',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#92400e',marginBottom:8}}><strong>⚠️ Note:</strong> No HTML on Drive — scored on deployed app.</div>}
                         {r?.action&&verdict!=='qualified'&&<div style={{background:'#fff8ee',border:'1px solid #fed7aa',borderRadius:10,padding:'10px 14px',fontSize:12,color:'#92400e',lineHeight:1.5,marginBottom:8}}><strong>🔧 Action Required:</strong> {r.action}</div>}
-                        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',marginTop:8}}>
+                        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',marginTop:8,marginBottom:others.length>0?12:0}}>
                           {htmlUp&&<a href={s.html_file} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📁 HTML File</a>}
                           {deployed&&<a href={s.deployed} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#16a34a',textDecoration:'none',fontWeight:600}}>🚀 Live App</a>}
                           {s.demo?.startsWith('http')&&<a href={s.demo} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📸 Demo</a>}
                           {r&&verdict!=='qualified'&&<a href={makeGmailLink(s,r)} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{padding:'5px 12px',fontSize:11,fontWeight:700,borderRadius:8,cursor:'pointer',border:`1px solid ${BRAND.blue}`,background:'#eff6ff',color:BRAND.blue,textDecoration:'none'}}>✉️ Draft Email to {getName(s.email).split(' ')[0]}</a>}
                         </div>
+
+                        {/* Other submissions by same person */}
+                        {others.length>0&&(
+                          <div style={{borderTop:`1px solid ${BRAND.border}`,paddingTop:10}}>
+                            <button onClick={e=>{e.stopPropagation();setExpanded(p=>({...p,[othersExpKey]:!p[othersExpKey]}))}}
+                              style={{background:'none',border:`1px solid ${BRAND.border}`,borderRadius:8,padding:'5px 12px',fontSize:12,color:BRAND.textMuted,cursor:'pointer',fontWeight:600,marginBottom:isOthersExp?10:0}}>
+                              {isOthersExp?'▲':'▼'} Other Submissions from {name} ({others.length})
+                            </button>
+                            {isOthersExp&&(
+                              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                                {others.map(({s:os,i:oi,r:or})=>{
+                                  const ov=calcVerdict(or)
+                                  const ohtmlUp=hasHtmlFile(os);const odeployed=hasDeployedLink(os)
+                                  return(
+                                    <div key={oi} style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px'}}>
+                                      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10,flexWrap:'wrap',marginBottom:6}}>
+                                        <div>
+                                          <div style={{fontSize:12,fontWeight:700,color:BRAND.navy,marginBottom:2}}>{os.tool_name}</div>
+                                          <div style={{fontSize:11,color:BRAND.textMuted}}>Submission #{oi+1}</div>
+                                        </div>
+                                        <VerdictBadge verdict={ov}/>
+                                      </div>
+                                      {or&&<div style={{display:'flex',gap:2,flexWrap:'wrap',marginBottom:6}}><ScorePill score={or.intent} label="Intent"/><ScorePill score={or.prompt} label="Prompt"/><ScorePill score={or.html} label="HTML"/>{or.ai_score>0&&<StarScore score={or.ai_score}/>}</div>}
+                                      {or?.summary&&<div style={{fontSize:11,color:'#666',lineHeight:1.4,marginBottom:6}}>{or.summary}</div>}
+                                      {or?.action&&ov!=='qualified'&&<div style={{fontSize:11,color:'#92400e',background:'#fff8ee',borderRadius:6,padding:'6px 10px',marginBottom:6}}><strong>🔧</strong> {or.action}</div>}
+                                      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                                        {ohtmlUp&&<a href={os.html_file} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📁 HTML</a>}
+                                        {odeployed&&<a href={os.deployed} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#16a34a',textDecoration:'none',fontWeight:600}}>🚀 Live</a>}
+                                        {os.demo?.startsWith('http')&&<a href={os.demo} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📸 Demo</a>}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )
