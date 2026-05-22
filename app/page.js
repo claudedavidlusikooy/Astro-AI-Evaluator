@@ -9,7 +9,7 @@ const BRAND = {
   bgLight:'#F0F5FF', bgPage:'#EEF3FB', border:'#D0DCF5', textMuted:'#6B7BAD',
 }
 const AUTH = { username:'Astro.People', password:'@People2026' }
-const STORAGE_KEY = 'astro_eval_v10'
+const STORAGE_KEY = 'astro_eval_data'
 const DEADLINE = new Date('2026-06-01T23:59:59')
 
 const STAR_DATA = [
