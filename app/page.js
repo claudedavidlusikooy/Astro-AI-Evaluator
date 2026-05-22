@@ -600,19 +600,63 @@ export default function Home(){
     }
   },[results])
 
+  // Save subs/headers/fileName whenever they change
+  useEffect(()=>{
+    if(subs.length>0){
+      try{
+        localStorage.setItem(STORAGE_KEY+'_subs',JSON.stringify(subs))
+        localStorage.setItem(STORAGE_KEY+'_hdrs',JSON.stringify(originalHeaders))
+        localStorage.setItem(STORAGE_KEY+'_fname',fileName)
+      }catch(e){}
+    }
+  },[subs,originalHeaders,fileName])
+
   function setResubmit(idx,status){
     setResubmitStatus(prev=>{const next={...prev,[idx]:status};try{localStorage.setItem(STORAGE_KEY,JSON.stringify(next))}catch(e){};return next})
   }
 
   function doLogin(e){
     e.preventDefault()
-    if(loginUser.trim()===AUTH.username&&loginPass===AUTH.password){setLoginError('');setShowRocket(true)}
+    if(loginUser.trim()===AUTH.username&&loginPass===AUTH.password){
+      setLoginError('')
+      // Restore saved session from localStorage
+      try{
+        const savedSubs=localStorage.getItem(STORAGE_KEY+'_subs')
+        const savedRes=localStorage.getItem(STORAGE_KEY+'_res')
+        const savedHdrs=localStorage.getItem(STORAGE_KEY+'_hdrs')
+        const savedFname=localStorage.getItem(STORAGE_KEY+'_fname')
+        if(savedSubs&&savedHdrs){
+          const parsedSubs=JSON.parse(savedSubs)
+          const parsedHdrs=JSON.parse(savedHdrs)
+          const parsedRes=savedRes?JSON.parse(savedRes):new Array(parsedSubs.length).fill(null)
+          if(parsedSubs.length>0){
+            setSubs(parsedSubs)
+            setOriginalHeaders(parsedHdrs)
+            setResults(parsedRes.length===parsedSubs.length?parsedRes:new Array(parsedSubs.length).fill(null))
+            setFileName(savedFname||'')
+            // Skip rocket + upload, go straight to main
+            setScreen('main')
+            return
+          }
+        }
+      }catch(e){}
+      // No saved session — show rocket then upload
+      setShowRocket(true)
+    }
     else setLoginError('Incorrect username or password.')
   }
 
   function doLogout(){
+    // Clear all session data from localStorage
+    try{
+      localStorage.removeItem(STORAGE_KEY+'_subs')
+      localStorage.removeItem(STORAGE_KEY+'_res')
+      localStorage.removeItem(STORAGE_KEY+'_hdrs')
+      localStorage.removeItem(STORAGE_KEY+'_fname')
+    }catch(e){}
     setScreen('login');setLoginUser('');setLoginPass('')
     setSubs([]);setResults([]);setFileData(null);setFileName('')
+    setOriginalHeaders([]);setOriginalRows([])
     setExpanded({});setInsightData(null);setActiveTab('submissions');setModalIdx(null)
   }
 
@@ -816,7 +860,7 @@ export default function Home(){
       <div style={{maxWidth:580,margin:'60px auto',padding:'0 24px'}}>
         <div style={{background:'white',borderRadius:16,border:`1px solid ${BRAND.border}`,padding:36,boxShadow:'0 4px 24px rgba(27,43,107,0.08)'}}>
           <h2 style={{fontSize:18,fontWeight:800,color:BRAND.navy,marginBottom:6}}>Upload Submissions</h2>
-          <p style={{fontSize:13,color:BRAND.textMuted,marginBottom:6}}>Upload the Google Form response file. Previously evaluated submissions are preserved automatically — works with .xlsx, .xls, and .csv.</p>
+          <p style={{fontSize:13,color:BRAND.textMuted,marginBottom:6}}>Upload a new or updated Google Form response file. Your previous evaluation results will be matched and preserved automatically.</p>
           {subs.length>0&&<div style={{background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#1e40af',fontWeight:600,marginBottom:16}}>ℹ️ {results.filter(r=>r).length} results saved. New submissions will be detected automatically.</div>}
           <div style={{border:`2px dashed ${drag?BRAND.blue:BRAND.border}`,borderRadius:12,padding:32,textAlign:'center',cursor:'pointer',background:drag?'#EEF4FF':BRAND.bgLight,transition:'all 0.2s'}}
             onClick={()=>fileRef.current.click()} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)}
