@@ -9,10 +9,9 @@ const BRAND = {
   bgLight:'#F0F5FF', bgPage:'#EEF3FB', border:'#D0DCF5', textMuted:'#6B7BAD',
 }
 const AUTH = { username:'Astro.People', password:'@People2026' }
-const STORAGE_KEY = 'astro_eval_v9'
+const STORAGE_KEY = 'astro_eval_v10'
 const DEADLINE = new Date('2026-06-01T23:59:59')
 
-// Pre-calculated star positions to avoid Math.random() in render (fixes animation freeze)
 const STAR_DATA = [
   {w:3,h:3,l:8,t:12,d:2.1,del:0.3},{w:2,h:2,l:23,t:67,d:3.2,del:0.8},
   {w:4,h:4,l:41,t:23,d:2.8,del:1.1},{w:2,h:2,l:57,t:78,d:3.5,del:0.2},
@@ -23,25 +22,44 @@ const STAR_DATA = [
   {w:3,h:3,l:5,t:84,d:3.0,del:0.5},{w:2,h:2,l:96,t:63,d:2.5,del:1.4},
   {w:3,h:3,l:27,t:38,d:3.6,del:0.1},{w:4,h:4,l:68,t:8,d:2.3,del:1.6},
 ]
-// Pre-calculated planet positions
 const PLANET_DATA = [
   {size:60,l:8,t:15,hue:220,dur:18,del:0},{size:40,l:78,t:65,hue:260,dur:22,del:3},
   {size:25,l:55,t:80,hue:200,dur:15,del:1},{size:45,l:88,t:20,hue:240,dur:25,del:5},
   {size:20,l:15,t:70,hue:210,dur:12,del:2},
 ]
 
+// ── Verdict ────────────────────────────────────────────────
 function calcVerdict(r) {
   if (!r) return 'pending'
+  // Use AI-determined verdict if available
+  if (r.verdict) return r.verdict
+  // Fallback calculation
   const fulls=[r.intent,r.prompt,r.html].filter(s=>s==='full').length
   const nones=[r.intent,r.prompt,r.html].filter(s=>s==='none').length
   return (fulls>=2&&nones===0)?'qualified':'not_qualified'
 }
-const VS={
-  qualified:{bg:'#dcfce7',color:'#15803d',label:'✅ Qualified'},
-  not_qualified:{bg:'#fee2e2',color:'#991b1b',label:'🔄 Not Qualified'},
-  pending:{bg:'#f1f5f9',color:'#64748b',label:'Pending'},
+
+const VS = {
+  qualified:     {bg:'#dcfce7', color:'#15803d', label:'✅ Qualified', border:'#86efac'},
+  manual_review: {bg:'#fff7ed', color:'#c2410c', label:'⚠️ Manual Review', border:'#fb923c'},
+  not_qualified: {bg:'#fee2e2', color:'#991b1b', label:'🔄 Not Qualified', border:'#fca5a5'},
+  pending:       {bg:'#f1f5f9', color:'#64748b', label:'Pending', border:'#cbd5e1'},
 }
-function VerdictBadge({verdict}){const v=VS[verdict]||VS.pending;return<span style={{display:'inline-block',padding:'4px 10px',borderRadius:12,fontSize:11,fontWeight:700,whiteSpace:'nowrap',background:v.bg,color:v.color}}>{v.label}</span>}
+
+function VerdictBadge({verdict, large}){
+  const v=VS[verdict]||VS.pending
+  const isManual = verdict==='manual_review'
+  return(
+    <span style={{
+      display:'inline-block', padding: large?'6px 14px':'4px 10px',
+      borderRadius:12, fontSize: large?13:11, fontWeight:800,
+      whiteSpace:'nowrap', background:v.bg, color:v.color,
+      border:`1.5px solid ${v.border}`,
+      boxShadow: isManual?'0 0 0 2px rgba(251,146,60,0.3)':undefined,
+    }}>{v.label}</span>
+  )
+}
+
 function looksLikeLinkOnly(val){if(!val)return false;const t=val.trim();return t.startsWith('http')&&!t.includes(' ')&&t.length<400}
 
 // ── File helpers ───────────────────────────────────────────
@@ -71,9 +89,7 @@ function pick(row,...keys){
 }
 function mapRow(row){
   return{
-    _raw:row,
-    email:pick(row,'email'),
-    dept:pick(row,'function','team','dept','divisi'),
+    _raw:row,email:pick(row,'email'),dept:pick(row,'function','team','dept','divisi'),
     purpose:pick(row,'purpose','tujuan'),
     tool_name:pick(row,'tool name','tool_name','nama tool','nama aplikasi'),
     problem:pick(row,'problem','solve','masalah','kendala'),
@@ -86,40 +102,35 @@ function mapRow(row){
   }
 }
 function hasHtmlFile(s){const h=s.html_file||'';return h.length>4&&(h.includes('drive.google')||(h.startsWith('http')&&!h.includes('chatgpt')&&!h.includes('claude.ai')))}
-function hasDeployedLink(s){const d=s.deployed||'';return d.length>3&&d!=='-'&&d.startsWith('http')&&!d.startsWith('file://')&&!['chatgpt.com','suno.com','play.google','claude.ai'].some(x=>d.includes(x))}
+function hasDeployedLink(s){const d=s.deployed||'';return d.length>3&&d!=='-'&&d.startsWith('http')&&!d.startsWith('file://')&&!['chatgpt.com','suno.com','play.google','claude.ai','localhost'].some(x=>d.includes(x))}
 function getName(email){return(email||'').split('@')[0].split('.').map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join(' ')}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
-
-// Make a fingerprint for a submission to detect if it changed
-function makeFingerprint(s){
-  return[s.email,s.tool_name,s.problem,s.prompt,s.html_file,s.deployed].join('|||')
-}
-
+function makeFingerprint(s){return[s.email,s.tool_name,s.problem,s.prompt,s.html_file,s.deployed].join('|||')}
 function getDeadlineCountdown(){
   const now=new Date();const diff=DEADLINE-now
   if(diff<=0)return{text:'Deadline passed',urgent:true}
-  const days=Math.floor(diff/(1000*60*60*24))
-  const hours=Math.floor((diff%(1000*60*60*24))/(1000*60*60))
+  const days=Math.floor(diff/(1000*60*60*24));const hours=Math.floor((diff%(1000*60*60*24))/(1000*60*60))
   if(days>0)return{text:`${days}d ${hours}h until deadline`,urgent:days<=3}
   return{text:`${hours}h until deadline`,urgent:true}
 }
 
-// ── Export ─────────────────────────────────────────────────
-async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus){
+async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus,manualOverrides){
   const XLSX=await loadXLSX()
-  const newCols=['Verdict','Resubmit Status','Intent Score','Prompt Score','HTML Score','AI Score','HTML Uploaded','Description Flag','Summary','Action Required']
+  const newCols=['Verdict','Manual Override','Resubmit Status','Intent Score','Prompt Score','HTML Score','AI Score','HTML Uploaded','Flags','Summary','Action Required']
   const headers=[...originalHeaders,...newCols]
+  const VLABELS={qualified:'✅ Qualified',manual_review:'⚠️ Manual Review',not_qualified:'🔄 Not Qualified',pending:'Pending'}
   const data=subs.map((s,i)=>{
-    const r=results[i];const verdict=calcVerdict(r);const orig=originalRows[i]||{};const row={}
+    const r=results[i];const verdict=calcVerdict(r);const override=manualOverrides[i];const orig=originalRows[i]||{};const row={}
     originalHeaders.forEach(h=>{row[h]=orig[h]!==undefined?orig[h]:''})
-    row['Verdict']=verdict==='qualified'?'✅ Qualified':verdict==='not_qualified'?'🔄 Not Qualified':'Pending'
-    row['Resubmit Status']=verdict==='not_qualified'?({pending:'⏳ Pending',resubmitted:'📬 Resubmitted',confirmed:'✅ Confirmed'}[resubmitStatus[i]||'pending']||'⏳ Pending'):'—'
+    row['Verdict']=VLABELS[override?.verdict||verdict]||'Pending'
+    row['Manual Override']=override?`Yes — ${override.verdict==='qualified'?'Passed':'Not Qualified'} by People Team`:''
+    row['Resubmit Status']=(['not_qualified','manual_review'].includes(override?.verdict||verdict))?({pending:'⏳ Pending',resubmitted:'📬 Resubmitted',confirmed:'✅ Confirmed'}[resubmitStatus[i]||'pending']||'⏳ Pending'):'—'
     row['Intent Score']=r?r.intent:'';row['Prompt Score']=r?r.prompt:'';row['HTML Score']=r?r.html:''
     row['AI Score']=r?`${r.ai_score}/5`:''
     row['HTML Uploaded']=hasHtmlFile(s)?'Yes':'No'
-    const flags=[];if(looksLikeLinkOnly(s.problem))flags.push('Problem:link');if(looksLikeLinkOnly(s.how))flags.push('How:link')
-    row['Description Flag']=flags.join(';')||''
-    row['Summary']=r?r.summary:'';row['Action Required']=r?r.action:''
+    const flags=[];if(looksLikeLinkOnly(s.problem))flags.push('Problem:link');if(looksLikeLinkOnly(s.how))flags.push('How:link');if(!hasHtmlFile(s)&&!hasDeployedLink(s)&&s.demo)flags.push('Demo only')
+    row['Flags']=flags.join(';')||''
+    row['Summary']=r?r.summary:'';row['Action Required']=override?.action||r?.action||''
     return row
   })
   const ws=XLSX.utils.json_to_sheet(data,{header:headers})
@@ -128,10 +139,10 @@ async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitSt
   XLSX.writeFile(wb,'astro_ai_challenge_results.xlsx')
 }
 
-function makeGmailLink(s,r){
-  const name=getName(s.email)
-  const subject=`Astro Personal AI Challenge — Resubmission Required`
-  const body=`Hi ${name},\n\nThank you for participating in Astro's Personal AI Challenge! 🚀\n\nYour submission "${s.tool_name}" has been marked as: 🔄 Not Qualified\n\n📋 FEEDBACK\n${r?.summary||''}\n\n🔧 ACTION REQUIRED\n${r?.action||''}\n\n📊 SCORES\n• Clear Intent: ${r?.intent||'-'} — ${r?.intent_reason||''}\n• Prompt: ${r?.prompt||'-'} — ${r?.prompt_reason||''}\n• HTML/App: ${r?.html||'-'} — ${r?.html_reason||''}\n• AI Score: ${r?.ai_score||'-'}/5\n\n📅 DEADLINE: 1 June 2026\nResubmit: https://bit.ly/AstroPersonalAI\n\nBest,\nPeople Team · Astro`
+function makeGmailLink(s,r,overrideAction){
+  const name=getName(s.email);const action=overrideAction||r?.action||''
+  const subject=`Astro Personal AI Challenge — Your Submission Needs Resubmission`
+  const body=`Hi ${name},\n\nThank you for participating in Astro's Personal AI Challenge! 🚀\n\nWe've reviewed your submission "${s.tool_name}" and it requires resubmission.\n\n📋 FEEDBACK\n${r?.summary||''}\n\n🔧 ACTION REQUIRED\n${action}\n\n📊 SCORES\n• Clear Intent: ${r?.intent||'-'} — ${r?.intent_reason||''}\n• Prompt: ${r?.prompt||'-'} — ${r?.prompt_reason||''}\n• HTML/App: ${r?.html||'-'} — ${r?.html_reason||''}\n• AI Score: ${r?.ai_score||'-'}/5\n\n📅 DEADLINE: 1 June 2026\nResubmit: https://bit.ly/AstroPersonalAI\n\nBest,\nPeople Team · Astro`
   return`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(s.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 }
 
@@ -141,62 +152,48 @@ function ScorePill({score,label}){const c=SS[score]||SS.none;return<span style={
 function ScoreLabel({score}){const c=SS[score]||SS.none;const L={full:'Fully Demonstrated',partial:'Partially Demonstrated',none:'Not Demonstrated'};return<span style={{display:'inline-block',padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:600,background:c.bg,color:c.color}}>{L[score]||'—'}</span>}
 function StarScore({score}){const n=parseInt(score)||0;return<div style={{display:'flex',alignItems:'center',gap:2}}>{[1,2,3,4,5].map(i=><span key={i} style={{fontSize:13,color:i<=n?'#f59e0b':'#e2e8f0'}}>★</span>)}<span style={{fontSize:11,color:BRAND.textMuted,marginLeft:2}}>{n}/5</span></div>}
 
-// ── Fluid 3D Sphere Loader (no mascot, pure CSS) ───────────
+// ── Fluid Sphere Loader ────────────────────────────────────
 function SphereLoader({current,total,label}){
   const pct=total?Math.round(current/total*100):0
   return(
     <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'44px 0 32px',gap:22}}>
       <style>{`
-        @keyframes sphereRotate{0%{transform:rotateY(0deg) rotateX(12deg)}100%{transform:rotateY(360deg) rotateX(12deg)}}
-        @keyframes swirl1{0%{transform:rotateZ(0deg) rotateX(70deg)}100%{transform:rotateZ(360deg) rotateX(70deg)}}
-        @keyframes swirl2{0%{transform:rotateZ(60deg) rotateX(55deg)}100%{transform:rotateZ(420deg) rotateX(55deg)}}
-        @keyframes swirl3{0%{transform:rotateZ(120deg) rotateX(80deg)}100%{transform:rotateZ(480deg) rotateX(80deg)}}
-        @keyframes swirl4{0%{transform:rotateZ(200deg) rotateX(45deg)}100%{transform:rotateZ(560deg) rotateX(45deg)}}
+        @keyframes swirlA{0%{transform:rotateZ(0deg) rotateX(70deg)}100%{transform:rotateZ(360deg) rotateX(70deg)}}
+        @keyframes swirlB{0%{transform:rotateZ(60deg) rotateX(55deg)}100%{transform:rotateZ(420deg) rotateX(55deg)}}
+        @keyframes swirlC{0%{transform:rotateZ(120deg) rotateX(80deg)}100%{transform:rotateZ(480deg) rotateX(80deg)}}
+        @keyframes swirlD{0%{transform:rotateZ(200deg) rotateX(45deg)}100%{transform:rotateZ(560deg) rotateX(45deg)}}
         @keyframes innerGlow{0%,100%{opacity:0.5;transform:scale(0.85)}50%{opacity:1;transform:scale(1.0)}}
-        @keyframes outerPulse{0%,100%{box-shadow:0 0 40px rgba(180,160,255,0.3),0 0 80px rgba(120,100,220,0.2)}50%{box-shadow:0 0 70px rgba(200,180,255,0.6),0 0 120px rgba(150,120,240,0.4)}}
-        @keyframes shimmer{0%{opacity:0.3;transform:translateX(-100%) rotate(45deg)}50%{opacity:0.8}100%{opacity:0.3;transform:translateX(200%) rotate(45deg)}}
-        @keyframes particleDrift{0%{transform:rotate(0deg) translateX(68px) rotate(0deg);opacity:0.8}100%{transform:rotate(360deg) translateX(68px) rotate(-360deg);opacity:0.8}}
+        @keyframes outerPulse{0%,100%{box-shadow:0 0 40px rgba(180,160,255,0.3)}50%{box-shadow:0 0 70px rgba(200,180,255,0.6)}}
+        @keyframes shimmer{0%{opacity:0.3;transform:translateX(-100%) rotate(45deg)}100%{opacity:0.3;transform:translateX(200%) rotate(45deg)}}
+        @keyframes particleDrift{0%{transform:rotate(0deg) translateX(68px) rotate(0deg)}100%{transform:rotate(360deg) translateX(68px) rotate(-360deg)}}
         @keyframes progGlow{0%,100%{box-shadow:0 0 10px rgba(180,150,255,0.5)}50%{box-shadow:0 0 25px rgba(200,170,255,0.9)}}
       `}</style>
       <div style={{position:'relative',width:160,height:160}}>
-        {/* Outer glow ring */}
-        <div style={{position:'absolute',inset:-16,borderRadius:'50%',background:'radial-gradient(circle, rgba(180,150,255,0.05) 0%, transparent 70%)',animation:'outerPulse 3s ease-in-out infinite'}}></div>
-        {/* Main sphere body */}
-        <div style={{position:'absolute',inset:0,borderRadius:'50%',background:'radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95) 0%, rgba(220,210,255,0.9) 20%, rgba(180,160,240,0.85) 45%, rgba(140,120,210,0.9) 65%, rgba(100,80,180,0.95) 85%, rgba(80,60,160,1) 100%)',animation:'outerPulse 3s ease-in-out infinite',overflow:'hidden'}}>
-          {/* Shimmer highlight */}
-          <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,background:'linear-gradient(135deg, rgba(255,255,255,0.8) 0%, transparent 40%)',borderRadius:'50%'}}></div>
+        <div style={{position:'absolute',inset:-16,borderRadius:'50%',background:'radial-gradient(circle,rgba(180,150,255,0.05) 0%,transparent 70%)',animation:'outerPulse 3s ease-in-out infinite'}}></div>
+        <div style={{position:'absolute',inset:0,borderRadius:'50%',background:'radial-gradient(circle at 32% 28%,rgba(255,255,255,0.95) 0%,rgba(220,210,255,0.9) 20%,rgba(180,160,240,0.85) 45%,rgba(140,120,210,0.9) 65%,rgba(80,60,160,1) 100%)',overflow:'hidden'}}>
+          <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,background:'linear-gradient(135deg,rgba(255,255,255,0.8) 0%,transparent 40%)',borderRadius:'50%'}}></div>
           <div style={{position:'absolute',width:'200%',height:'30%',top:'25%',left:'-50%',background:'linear-gradient(90deg,transparent,rgba(255,255,255,0.4),transparent)',animation:'shimmer 2.5s ease-in-out infinite'}}></div>
         </div>
-        {/* Swirling rings */}
-        {[
-          {anim:'swirl1',dur:'4s',color:'rgba(200,180,255,0.6)',w:2},
-          {anim:'swirl2',dur:'5s',color:'rgba(160,140,255,0.5)',w:1.5},
-          {anim:'swirl3',dur:'3.5s',color:'rgba(220,200,255,0.7)',w:2.5},
-          {anim:'swirl4',dur:'6s',color:'rgba(180,160,240,0.4)',w:1},
-        ].map((ring,i)=>(
-          <div key={i} style={{position:'absolute',inset:-6+i*2,borderRadius:'50%',border:`${ring.w}px solid ${ring.color}`,animation:`${ring.anim} ${ring.dur} linear infinite`}}></div>
+        {[{a:'swirlA',d:'4s',c:'rgba(200,180,255,0.6)',w:2},{a:'swirlB',d:'5s',c:'rgba(160,140,255,0.5)',w:1.5},{a:'swirlC',d:'3.5s',c:'rgba(220,200,255,0.7)',w:2.5},{a:'swirlD',d:'6s',c:'rgba(180,160,240,0.4)',w:1}].map((ring,i)=>(
+          <div key={i} style={{position:'absolute',inset:-6+i*2,borderRadius:'50%',border:`${ring.w}px solid ${ring.c}`,animation:`${ring.a} ${ring.d} linear infinite`}}></div>
         ))}
-        {/* Orbiting particles */}
         {[0,72,144,216,288].map((deg,i)=>(
           <div key={i} style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',animation:`particleDrift ${2.5+i*0.4}s linear infinite`,animationDelay:`${i*0.5}s`}}>
-            <div style={{width:5+i%3*2,height:5+i%3*2,borderRadius:'50%',background:`rgba(${200+i*10},${180+i*8},255,0.9)`,boxShadow:`0 0 10px rgba(180,160,255,0.8)`}}></div>
+            <div style={{width:5+i%3*2,height:5+i%3*2,borderRadius:'50%',background:`rgba(${200+i*10},${180+i*8},255,0.9)`,boxShadow:'0 0 10px rgba(180,160,255,0.8)'}}></div>
           </div>
         ))}
-        {/* Inner core glow */}
         <div style={{position:'absolute',inset:'30%',borderRadius:'50%',background:'radial-gradient(circle,rgba(255,255,255,0.9),rgba(220,210,255,0.6))',animation:'innerGlow 2s ease-in-out infinite'}}></div>
       </div>
       <div style={{textAlign:'center'}}>
         <div style={{fontSize:15,fontWeight:700,color:BRAND.navy,marginBottom:4}}>{label||'AI is analyzing submissions…'}</div>
         {total>0&&<div style={{fontSize:12,color:BRAND.textMuted}}>{current} of {total} processed</div>}
       </div>
-      {total>0&&(
-        <>
-          <div style={{width:260,background:BRAND.border,borderRadius:10,height:8,overflow:'hidden'}}>
-            <div style={{background:'linear-gradient(90deg,#9B8FFF,#6B5CE6,#B8A4FF)',borderRadius:10,height:8,width:`${pct}%`,transition:'width 0.4s ease',animation:'progGlow 1.5s ease-in-out infinite'}}></div>
-          </div>
-          <div style={{fontSize:16,fontWeight:900,color:'#6B5CE6'}}>{pct}%</div>
-        </>
-      )}
+      {total>0&&<>
+        <div style={{width:260,background:BRAND.border,borderRadius:10,height:8,overflow:'hidden'}}>
+          <div style={{background:'linear-gradient(90deg,#9B8FFF,#6B5CE6,#B8A4FF)',borderRadius:10,height:8,width:`${pct}%`,transition:'width 0.4s ease',animation:'progGlow 1.5s ease-in-out infinite'}}></div>
+        </div>
+        <div style={{fontSize:16,fontWeight:900,color:'#6B5CE6'}}>{pct}%</div>
+      </>}
     </div>
   )
 }
@@ -206,13 +203,7 @@ function RocketTransition({onDone}){
   useEffect(()=>{const t=setTimeout(onDone,3000);return()=>clearTimeout(t)},[onDone])
   return(
     <div style={{position:'fixed',inset:0,background:`linear-gradient(135deg,${BRAND.navy} 0%,${BRAND.blue} 60%,${BRAND.lightBlue} 100%)`,zIndex:9999,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
-      <style>{`
-        @keyframes rL{0%{transform:translateY(80px) scale(0.6);opacity:0}25%{opacity:1;transform:translateY(10px) scale(0.95)}60%{transform:translateY(-15px) scale(1.05)}100%{transform:translateY(-180px) scale(0.3);opacity:0}}
-        @keyframes sF{0%{opacity:0;transform:scale(0)}50%{opacity:1}100%{opacity:0;transform:translateY(-120px) scale(2)}}
-        @keyframes bR{0%{opacity:0;transform:scale(0.6) translateY(40px)}60%{opacity:1;transform:scale(1.1) translateY(-5px)}100%{opacity:1;transform:scale(1) translateY(0)}}
-        @keyframes gT{0%,100%{text-shadow:0 0 20px rgba(125,232,245,0.4)}50%{text-shadow:0 0 60px rgba(125,232,245,1),0 0 120px rgba(43,92,230,0.9)}}
-        @keyframes mRock{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(10deg)}}
-      `}</style>
+      <style>{`@keyframes rL{0%{transform:translateY(80px) scale(0.6);opacity:0}25%{opacity:1;transform:translateY(10px) scale(0.95)}60%{transform:translateY(-15px) scale(1.05)}100%{transform:translateY(-180px) scale(0.3);opacity:0}}@keyframes sF{0%{opacity:0;transform:scale(0)}50%{opacity:1}100%{opacity:0;transform:translateY(-120px) scale(2)}}@keyframes bR{0%{opacity:0;transform:scale(0.6) translateY(40px)}60%{opacity:1;transform:scale(1.1) translateY(-5px)}100%{opacity:1;transform:scale(1) translateY(0)}}@keyframes gT{0%,100%{text-shadow:0 0 20px rgba(125,232,245,0.4)}50%{text-shadow:0 0 60px rgba(125,232,245,1),0 0 120px rgba(43,92,230,0.9)}}@keyframes mRock{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(10deg)}}`}</style>
       {STAR_DATA.map((s,i)=><div key={i} style={{position:'absolute',width:s.w,height:s.h,borderRadius:'50%',background:'white',left:`${s.l}%`,top:`${s.t}%`,animation:`sF ${s.d}s ease-out ${s.del}s infinite`,opacity:0}}></div>)}
       <div style={{animation:'rL 2.8s ease-in-out forwards',display:'flex',flexDirection:'column',alignItems:'center'}}>
         <div style={{animation:'mRock 0.35s ease-in-out infinite'}}><img src={MASCOT_RUNNING} alt="" style={{width:160,filter:'drop-shadow(0 0 30px rgba(125,232,245,1))'}}/></div>
@@ -237,9 +228,9 @@ function LegendCard(){
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:14}}>
             <div>
               <div style={{fontSize:12,fontWeight:800,color:BRAND.navy,marginBottom:10}}>Verdict</div>
-              {[['✅ Qualified','#dcfce7','#15803d','2+ criteria Fully Demonstrated AND zero Not Demonstrated.'],['🔄 Not Qualified','#fee2e2','#991b1b','Does not meet threshold. Must resubmit by 1 June 2026.']].map(([lbl,bg,color,desc])=>(
+              {[['✅ Qualified','#dcfce7','#15803d','2+ Fully Demonstrated AND zero Not Demonstrated.'],['⚠️ Manual Review','#fff7ed','#c2410c','Flagged for human verification — tool may work but needs review.'],['🔄 Not Qualified','#fee2e2','#991b1b','Missing critical components. Must resubmit by 1 June 2026.']].map(([lbl,bg,color,desc])=>(
                 <div key={lbl} style={{display:'flex',alignItems:'flex-start',gap:10,marginBottom:8}}>
-                  <span style={{background:bg,color,fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:10,whiteSpace:'nowrap'}}>{lbl}</span>
+                  <span style={{background:bg,color,fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:10,whiteSpace:'nowrap',border:`1px solid ${color}44`}}>{lbl}</span>
                   <span style={{fontSize:12,color:'#555',lineHeight:1.4}}>{desc}</span>
                 </div>
               ))}
@@ -254,7 +245,7 @@ function LegendCard(){
           <div style={{borderTop:`1px solid ${BRAND.border}`,paddingTop:14,marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:800,color:BRAND.navy,marginBottom:8}}>3 Evaluation Criteria</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
-              {[['1. Clear Intent','Clearly states the problem and why it matters'],['2. Multi-Conversation Prompt','Shows iteration, back-and-forth, or detailed prompting'],['3. Working HTML / App','HTML file uploaded OR a live deployed app link']].map(([t,d])=>(
+              {[['1. Clear Intent','Specific problem stated — concise is OK, short ≠ vague'],['2. AI Usage Evidence','Any evidence of AI use: prompt, link, summary, or tool complexity'],['3. Working Output','HTML, deployed app, browser extension, CLI tool, bot, or demo evidence']].map(([t,d])=>(
                 <div key={t} style={{background:BRAND.bgLight,borderRadius:8,padding:'10px 12px'}}><div style={{fontSize:11,fontWeight:700,color:BRAND.navy,marginBottom:4}}>{t}</div><div style={{fontSize:11,color:BRAND.textMuted,lineHeight:1.4}}>{d}</div></div>
               ))}
             </div>
@@ -273,10 +264,10 @@ function LegendCard(){
   )
 }
 
-// ── Submission Detail Modal ────────────────────────────────
-function SubmissionModal({s,r,idx,onClose}){
+// ── Submission Modal ───────────────────────────────────────
+function SubmissionModal({s,r,idx,onClose,override}){
   if(!s)return null
-  const verdict=calcVerdict(r)
+  const verdict=override?.verdict||calcVerdict(r)
   const htmlUp=hasHtmlFile(s);const deployed=hasDeployedLink(s)
   const probIsLink=looksLikeLinkOnly(s.problem);const howIsLink=looksLikeLinkOnly(s.how)
   return(
@@ -289,9 +280,8 @@ function SubmissionModal({s,r,idx,onClose}){
               <span style={{fontSize:12,color:BRAND.textMuted}}>{getName(s.email)}</span>
               <span style={{fontSize:11,color:BRAND.textMuted}}>·</span>
               <span style={{fontSize:12,color:BRAND.textMuted}}>{s.dept}</span>
-              <span style={{fontSize:11,color:BRAND.textMuted}}>·</span>
-              <span style={{background:BRAND.bgLight,color:BRAND.textMuted,fontSize:11,padding:'2px 8px',borderRadius:8,fontWeight:600}}>{s.purpose}</span>
               <VerdictBadge verdict={verdict}/>
+              {override&&<span style={{fontSize:10,background:'#dbeafe',color:'#1e40af',padding:'2px 8px',borderRadius:8,fontWeight:700}}>✏️ Manually Overridden</span>}
             </div>
           </div>
           <button onClick={onClose} style={{background:'none',border:`1px solid ${BRAND.border}`,borderRadius:8,padding:'6px 12px',fontSize:12,cursor:'pointer',color:BRAND.textMuted,flexShrink:0}}>✕ Close</button>
@@ -299,11 +289,11 @@ function SubmissionModal({s,r,idx,onClose}){
         {r?.summary&&<div style={{background:BRAND.bgLight,borderRadius:10,padding:'12px 14px',marginBottom:16,fontSize:13,color:'#444',lineHeight:1.6}}>{r.summary}</div>}
         <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
           <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,fontWeight:700,marginBottom:6}}>Problem Stated</div>
-          {probIsLink?<div style={{fontSize:13,color:'#0369a1'}}>🔗 <a href={s.problem} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>External document</a></div>:<div style={{fontSize:13,color:'#444',lineHeight:1.6}}>{s.problem||'—'}</div>}
+          {probIsLink?<div style={{fontSize:13,color:'#0369a1'}}>🔗 <a href={s.problem} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>External document</a> — open to review</div>:<div style={{fontSize:13,color:'#444',lineHeight:1.6}}>{s.problem||'—'}</div>}
         </div>
         {s.how&&<div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
           <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,fontWeight:700,marginBottom:6}}>How It Works</div>
-          {howIsLink?<div style={{fontSize:13,color:'#0369a1'}}>🔗 <a href={s.how} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>External document</a></div>:<div style={{fontSize:13,color:'#444',lineHeight:1.6}}>{s.how}</div>}
+          {howIsLink?<div style={{fontSize:13,color:'#0369a1'}}>🔗 <a href={s.how} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>External document</a> — open to review</div>:<div style={{fontSize:13,color:'#444',lineHeight:1.6}}>{s.how}</div>}
         </div>}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
           {r&&[['Clear Intent','intent','intent_reason'],['Multi-Conv. Prompt','prompt','prompt_reason'],['Working HTML/App','html','html_reason'],['AI Implementation','ai_score','ai_score_reason']].map(([lbl,sk,rk])=>(
@@ -314,12 +304,12 @@ function SubmissionModal({s,r,idx,onClose}){
             </div>
           ))}
         </div>
-        {r?.action&&verdict!=='qualified'&&<div style={{background:'#fff8ee',border:'1px solid #fed7aa',borderRadius:10,padding:'12px 14px',fontSize:13,color:'#92400e',lineHeight:1.5,marginBottom:12}}><strong>🔧 Action Required:</strong> {r.action}</div>}
+        {(override?.action||r?.action)&&verdict!=='qualified'&&<div style={{background:'#fff8ee',border:'1px solid #fed7aa',borderRadius:10,padding:'12px 14px',fontSize:13,color:'#92400e',lineHeight:1.5,marginBottom:12}}><strong>🔧 Action Required:</strong> {override?.action||r?.action}</div>}
         <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
           {htmlUp&&<a href={s.html_file} target="_blank" rel="noreferrer" style={{fontSize:12,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📁 HTML File</a>}
           {deployed&&<a href={s.deployed} target="_blank" rel="noreferrer" style={{fontSize:12,color:'#16a34a',textDecoration:'none',fontWeight:600}}>🚀 Live App</a>}
-          {s.demo?.startsWith('http')&&<a href={s.demo} target="_blank" rel="noreferrer" style={{fontSize:12,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📸 Demo</a>}
-          {r&&verdict!=='qualified'&&<a href={makeGmailLink(s,r)} target="_blank" rel="noreferrer" style={{padding:'6px 14px',fontSize:12,fontWeight:700,borderRadius:8,border:`1px solid ${BRAND.blue}`,background:'#eff6ff',color:BRAND.blue,textDecoration:'none'}}>✉️ Draft Email</a>}
+          {s.demo?.startsWith('http')&&<a href={s.demo} target="_blank" rel="noreferrer" style={{fontSize:12,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📸 Demo/Video</a>}
+          {r&&verdict!=='qualified'&&<a href={makeGmailLink(s,r,override?.action)} target="_blank" rel="noreferrer" style={{padding:'6px 14px',fontSize:12,fontWeight:700,borderRadius:8,border:`1px solid ${BRAND.blue}`,background:'#eff6ff',color:BRAND.blue,textDecoration:'none'}}>✉️ Draft Email</a>}
         </div>
       </div>
     </div>
@@ -327,11 +317,10 @@ function SubmissionModal({s,r,idx,onClose}){
 }
 
 // ── Top Submissions ────────────────────────────────────────
-function TopSubmissions({subs,results,onSelect}){
-  const top=subs.map((s,i)=>({s,r:results[i],i}))
-    .filter(({r})=>r&&r.ai_score>=4&&calcVerdict(r)==='qualified')
-    .sort((a,b)=>(b.r.ai_score-a.r.ai_score))
-    .slice(0,6)
+function TopSubmissions({subs,results,manualOverrides,onSelect}){
+  const top=subs.map((s,i)=>({s,r:results[i],i,ov:manualOverrides[i]}))
+    .filter(({r,ov})=>r&&r.ai_score>=4&&(ov?.verdict||calcVerdict(r))==='qualified')
+    .sort((a,b)=>b.r.ai_score-a.r.ai_score).slice(0,6)
   if(top.length===0)return(
     <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'48px',textAlign:'center',color:BRAND.textMuted}}>
       <div style={{fontSize:32,marginBottom:12}}>🏆</div>
@@ -341,13 +330,14 @@ function TopSubmissions({subs,results,onSelect}){
   return(
     <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'20px 24px',boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
       <div style={{fontSize:15,fontWeight:800,color:BRAND.navy,marginBottom:4}}>🏆 Top Submissions</div>
-      <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:16}}>AI score 4★+ · Qualified · Click to view details</div>
+      <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:16}}>AI score 4★+ · Qualified · Click to view full details</div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
-        {top.map(({s,r,i},rank)=>(
+        {top.map(({s,r,i,ov},rank)=>(
           <div key={i} onClick={()=>onSelect(i)} style={{background:BRAND.bgLight,borderRadius:12,padding:'14px 16px',border:`1px solid ${BRAND.border}`,cursor:'pointer',transition:'all 0.15s',position:'relative'}}
             onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 6px 20px rgba(27,43,107,0.12)'}}
             onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='none'}}>
             {rank<3&&<div style={{position:'absolute',top:10,right:12,fontSize:16}}>{['🥇','🥈','🥉'][rank]}</div>}
+            {ov&&<div style={{position:'absolute',top:10,left:12,fontSize:10,background:'#dbeafe',color:'#1e40af',padding:'1px 6px',borderRadius:6,fontWeight:700}}>✏️ Override</div>}
             <div style={{display:'flex',gap:1,marginBottom:6}}>{[1,2,3,4,5].map(j=><span key={j} style={{fontSize:12,color:j<=r.ai_score?'#f59e0b':'#e2e8f0'}}>★</span>)}</div>
             <div style={{fontWeight:700,color:BRAND.navy,fontSize:13,marginBottom:3}}>{s.tool_name}</div>
             <div style={{fontSize:12,color:BRAND.blue,fontWeight:600,marginBottom:2}}>{getName(s.email)}</div>
@@ -362,53 +352,19 @@ function TopSubmissions({subs,results,onSelect}){
 }
 
 // ── PDF Export ─────────────────────────────────────────────
-function exportInsightsPDF(insightData,counts,subs,results){
+function exportInsightsPDF(insightData,counts,uniqueCount,subs){
   const MC={'Beginner':'#dc2626','Developing':'#d97706','Intermediate':'#2563eb','Advanced':'#16a34a'}
-  const totalEval=results.filter(r=>r).length
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Astro AI Challenge — Insights Report</title>
-<style>
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:40px;color:#1B2B6B;background:white}
-.header{background:linear-gradient(135deg,#1B2B6B,#2B5CE6);color:white;padding:32px 40px;border-radius:12px;margin-bottom:32px}
-.header h1{font-size:26px;font-weight:900;margin:0 0 6px}
-.header p{font-size:13px;opacity:0.7;margin:0}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
-.stat{background:#F0F5FF;border-radius:10px;padding:14px 16px;text-align:center}
-.stat .n{font-size:28px;font-weight:800;color:#1B2B6B}
-.stat .l{font-size:10px;color:#6B7BAD;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}
-.section{margin-bottom:28px}
-.section h2{font-size:16px;font-weight:800;color:#1B2B6B;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #D0DCF5}
-.maturity{display:inline-block;padding:6px 16px;border-radius:10px;font-size:13px;font-weight:700;margin-bottom:14px}
-.summary{font-size:13px;line-height:1.7;color:#444;margin-bottom:18px}
-.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
-.card{border-radius:10px;padding:14px 16px}
-.card h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px}
-.card li{font-size:12px;line-height:1.5;margin-bottom:5px;list-style:none;padding-left:12px;position:relative}
-.card li:before{content:'•';position:absolute;left:0}
-.fn-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.fn-card{border:1px solid #D0DCF5;border-radius:10px;padding:16px 18px}
-.fn-card h3{font-size:14px;font-weight:800;color:#1B2B6B;margin:0 0 4px}
-.fn-meta{font-size:11px;color:#6B7BAD;margin-bottom:8px}
-.stars{color:#f59e0b;font-size:14px;margin-bottom:6px}
-.bar-bg{background:#e2e8f0;border-radius:4px;height:4px;margin-bottom:10px}
-.bar-fg{background:linear-gradient(90deg,#16a34a,#22c55e);border-radius:4px;height:4px}
-.fn-sum{font-size:12px;color:#555;line-height:1.5;margin-bottom:10px}
-.fn-2col{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.fn-box{border-radius:7px;padding:8px 10px}
-.fn-box h4{font-size:10px;font-weight:700;text-transform:uppercase;margin:0 0 5px}
-.fn-box li{font-size:11px;line-height:1.4;margin-bottom:3px;list-style:none;padding-left:10px;position:relative}
-.fn-box li:before{content:'•';position:absolute;left:0}
-.footer{margin-top:40px;padding-top:16px;border-top:1px solid #D0DCF5;font-size:11px;color:#6B7BAD;text-align:center}
-@media print{body{padding:20px}button{display:none}}
-</style></head><body>
-<div class="header"><h1>Astro Personal AI Challenge</h1><p>AI Adoption Insights Report · Generated ${new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</p></div>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:40px;color:#1B2B6B}.header{background:linear-gradient(135deg,#1B2B6B,#2B5CE6);color:white;padding:32px 40px;border-radius:12px;margin-bottom:28px}.header h1{font-size:26px;font-weight:900;margin:0 0 6px}.header p{font-size:13px;opacity:0.7;margin:0}.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:28px}.stat{background:#F0F5FF;border-radius:10px;padding:12px 14px;text-align:center}.stat .n{font-size:24px;font-weight:800}.stat .l{font-size:10px;color:#6B7BAD;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}.section{margin-bottom:28px}.section h2{font-size:16px;font-weight:800;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #D0DCF5}.maturity{display:inline-block;padding:6px 16px;border-radius:10px;font-size:13px;font-weight:700;margin-bottom:14px}.summary{font-size:13px;line-height:1.7;color:#444;margin-bottom:18px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}.card{border-radius:10px;padding:14px 16px}.card h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px}.card li{font-size:12px;line-height:1.5;margin-bottom:5px;list-style:none;padding-left:12px;position:relative}.card li:before{content:'•';position:absolute;left:0}.fn-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.fn-card{border:1px solid #D0DCF5;border-radius:10px;padding:16px}.fn-card h3{font-size:14px;font-weight:800;margin:0 0 4px}.fn-meta{font-size:11px;color:#6B7BAD;margin-bottom:8px}.stars{color:#f59e0b;font-size:14px;margin-bottom:6px}.bar-bg{background:#e2e8f0;border-radius:4px;height:4px;margin-bottom:10px}.bar-fg{background:linear-gradient(90deg,#16a34a,#22c55e);border-radius:4px;height:4px}.fn-sum{font-size:12px;color:#555;line-height:1.5;margin-bottom:10px}.fn-2col{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fn-box{border-radius:7px;padding:8px 10px}.fn-box h4{font-size:10px;font-weight:700;text-transform:uppercase;margin:0 0 5px}.fn-box li{font-size:11px;line-height:1.4;margin-bottom:3px;list-style:none;padding-left:10px;position:relative}.fn-box li:before{content:'•';position:absolute;left:0}.footer{margin-top:40px;padding-top:16px;border-top:1px solid #D0DCF5;font-size:11px;color:#6B7BAD;text-align:center}@media print{button{display:none}}</style></head><body>
+<div class="header"><h1>Astro Personal AI Challenge</h1><p>AI Adoption Insights Report · ${new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</p></div>
 <div class="stats">
 <div class="stat"><div class="n">${subs.length}</div><div class="l">Total Submissions</div></div>
-<div class="stat"><div class="n">${counts.qualified||0}</div><div class="l">Qualified</div></div>
-<div class="stat"><div class="n">${counts.not_qualified||0}</div><div class="l">Not Qualified</div></div>
-<div class="stat"><div class="n">${totalEval>0?Math.round((counts.qualified||0)/totalEval*100):0}%</div><div class="l">Pass Rate</div></div>
+<div class="stat"><div class="n">${uniqueCount}</div><div class="l">Unique Submitters</div></div>
+<div class="stat"><div class="n" style="color:#16a34a">${counts.qualified||0}</div><div class="l">Qualified</div></div>
+<div class="stat"><div class="n" style="color:#c2410c">${counts.manual_review||0}</div><div class="l">Manual Review</div></div>
+<div class="stat"><div class="n" style="color:#dc2626">${counts.not_qualified||0}</div><div class="l">Not Qualified</div></div>
 </div>
-<div class="section">
-<h2>🏢 Company-Wide AI Maturity</h2>
+<div class="section"><h2>🏢 Company-Wide AI Maturity</h2>
 <div class="maturity" style="background:${MC[insightData.overall_ai_maturity]||'#64748b'}22;color:${MC[insightData.overall_ai_maturity]||'#64748b'}">${insightData.overall_ai_maturity||'—'}</div>
 <div class="summary">${insightData.company_summary||''}</div>
 <div class="grid3">
@@ -416,32 +372,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0
 <div class="card" style="background:#fef3c7"><h3 style="color:#854d0e">🔍 Gaps</h3>${(insightData.company_gaps||[]).map(s=>`<li>${s}</li>`).join('')}</div>
 <div class="card" style="background:#dbeafe"><h3 style="color:#1e40af">🚀 Recommendations</h3>${(insightData.company_recommendations||[]).map(s=>`<li>${s}</li>`).join('')}</div>
 </div></div>
-<div class="section">
-<h2>📊 Breakdown by Function</h2>
-<div class="fn-grid">
-${(insightData.functions||[]).map(fn=>{
-  const q=fn.submission_count?Math.round(fn.qualified_count/fn.submission_count*100):0
-  const stars='★'.repeat(Math.round(fn.avg_ai_score||0))+'☆'.repeat(5-Math.round(fn.avg_ai_score||0))
-  return`<div class="fn-card">
-<h3>${fn.name}</h3><div class="fn-meta">${fn.submission_count} submissions · ${fn.qualified_count} qualified (${q}%)</div>
-<div class="stars">${stars} ${fn.avg_ai_score}/5</div>
-<div class="bar-bg"><div class="bar-fg" style="width:${q}%"></div></div>
-<div class="fn-sum">${fn.summary||''}</div>
-<div class="fn-2col">
-<div class="fn-box" style="background:#f0fdf4"><h4 style="color:#15803d">Strengths</h4>${(fn.strengths||[]).map(s=>`<li>${s}</li>`).join('')}</div>
-<div class="fn-box" style="background:#fefce8"><h4 style="color:#854d0e">Next Steps</h4>${(fn.recommendations||[]).map(s=>`<li>${s}</li>`).join('')}</div>
-</div></div>`}).join('')}
+<div class="section"><h2>📊 Breakdown by Function</h2><div class="fn-grid">
+${(insightData.functions||[]).map(fn=>{const q=fn.submission_count?Math.round(fn.qualified_count/fn.submission_count*100):0;const stars='★'.repeat(Math.round(fn.avg_ai_score||0))+'☆'.repeat(5-Math.round(fn.avg_ai_score||0));return`<div class="fn-card"><h3>${fn.name}</h3><div class="fn-meta">${fn.submission_count} submissions · ${fn.qualified_count} qualified (${q}%)</div><div class="stars">${stars} ${fn.avg_ai_score}/5</div><div class="bar-bg"><div class="bar-fg" style="width:${q}%"></div></div><div class="fn-sum">${fn.summary||''}</div><div class="fn-2col"><div class="fn-box" style="background:#f0fdf4"><h4 style="color:#15803d">Strengths</h4>${(fn.strengths||[]).map(s=>`<li>${s}</li>`).join('')}</div><div class="fn-box" style="background:#fefce8"><h4 style="color:#854d0e">Next Steps</h4>${(fn.recommendations||[]).map(s=>`<li>${s}</li>`).join('')}</div></div></div>`}).join('')}
 </div></div>
 <div class="footer">Astro Technologies · Personal AI Challenge 2026 · Confidential — People Team use only</div>
 </body></html>`
-  const w=window.open('','_blank')
-  w.document.write(html)
-  w.document.close()
-  setTimeout(()=>w.print(),500)
+  const w=window.open('','_blank');w.document.write(html);w.document.close();setTimeout(()=>w.print(),500)
 }
 
 // ── Insights Tab ───────────────────────────────────────────
-function InsightsTab({subs,results,insightData,setInsightData,counts}){
+function InsightsTab({subs,results,insightData,setInsightData,counts,uniqueCount,manualOverrides}){
   const[loading,setLoading]=useState(false)
   const[error,setError]=useState('')
   const evaluatedCount=results.filter(r=>r).length
@@ -452,23 +392,20 @@ function InsightsTab({subs,results,insightData,setInsightData,counts}){
     const byFunction={}
     subs.forEach((s,i)=>{
       const r=results[i];if(!r)return
-      const fn=s.dept||'Unknown'
-      if(!byFunction[fn])byFunction[fn]=[]
-      byFunction[fn].push({name:getName(s.email),tool:s.tool_name,verdict:calcVerdict(r),ai_score:r.ai_score||0,summary:(r.summary||'').substring(0,100)})
+      const fn=s.dept||'Unknown';if(!byFunction[fn])byFunction[fn]=[]
+      const effectiveVerdict=manualOverrides[i]?.verdict||calcVerdict(r)
+      byFunction[fn].push({name:getName(s.email),tool:s.tool_name,verdict:effectiveVerdict,ai_score:r.ai_score||0,summary:(r.summary||'').substring(0,100)})
     })
     const allScores=results.filter(r=>r).map(r=>r.ai_score||0)
     const avgAI=allScores.length?(allScores.reduce((a,b)=>a+b,0)/allScores.length).toFixed(1):0
-    const qualifiedCount=results.filter(r=>calcVerdict(r)==='qualified').length
+    const qualifiedCount=Object.values(byFunction).flat().filter(x=>x.verdict==='qualified').length
     const totalEval=results.filter(r=>r).length
-
-    // Find example strong/weak submissions per function for richer insights
     const fnExamples=Object.entries(byFunction).map(([fn,items])=>{
       const strong=items.filter(x=>x.verdict==='qualified'&&x.ai_score>=4).slice(0,2).map(x=>`${x.name}(${x.tool})`)
       const weak=items.filter(x=>x.verdict==='not_qualified').slice(0,2).map(x=>`${x.name}(${x.tool})`)
-      return`${fn}: strong=${strong.join(',')}, needsWork=${weak.join(',')}`
+      return`${fn}(${items.length}subs,${items.filter(x=>x.verdict==='qualified').length}qual,avg${(items.reduce((a,b)=>a+(b.ai_score||0),0)/items.length).toFixed(1)}): strong=${strong.join(',')}, needsWork=${weak.join(',')}`
     }).join('\n')
-
-    const prompt=`AI L&D analyst for Astro's Personal AI Challenge. ${totalEval} evaluated. Qualified: ${qualifiedCount}/${totalEval} (${Math.round(qualifiedCount/totalEval*100)}%). Avg AI score: ${avgAI}/5.\n\nFunction data:\n${fnExamples}\n\nReturn ONLY valid JSON, ALL text under 100 chars, arrays max 3 items:\n{"company_summary":"2 clear sentences","company_strengths":["s1","s2","s3"],"company_gaps":["g1","g2","g3"],"company_recommendations":["r1","r2","r3"],"overall_ai_maturity":"Beginner|Developing|Intermediate|Advanced","functions":[{"name":"fn","submission_count":0,"qualified_count":0,"avg_ai_score":0.0,"summary":"1-2 sentences","strengths":["s1","s2"],"recommendations":["r1","r2"],"example_strong":"name - toolname","example_gap":"name - toolname"}]}`
+    const prompt=`AI L&D analyst for Astro's Personal AI Challenge. ${totalEval} evaluated. Qualified: ${qualifiedCount}/${totalEval} (${Math.round(qualifiedCount/totalEval*100)}%). Avg AI: ${avgAI}/5.\n\nFunction data:\n${fnExamples}\n\nReturn ONLY valid JSON, ALL text under 100 chars, arrays max 3 items:\n{"company_summary":"2 sentences","company_strengths":["s1","s2","s3"],"company_gaps":["g1","g2","g3"],"company_recommendations":["r1","r2","r3"],"overall_ai_maturity":"Beginner|Developing|Intermediate|Advanced","functions":[{"name":"fn","submission_count":0,"qualified_count":0,"avg_ai_score":0.0,"summary":"1-2 sentences","strengths":["s1","s2"],"recommendations":["r1","r2"],"example_strong":"name - tool","example_gap":"name - tool"}]}`
     try{
       const resp=await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({insightPrompt:prompt})})
       const data=await resp.json()
@@ -476,29 +413,21 @@ function InsightsTab({subs,results,insightData,setInsightData,counts}){
       setInsightData(data.result)
     }catch(e){setError('Error: '+e.message)}
     setLoading(false)
-  },[subs,results,evaluatedCount])
+  },[subs,results,evaluatedCount,manualOverrides])
 
-  // Auto-generate when all evaluated
   useEffect(()=>{
-    if(evaluatedCount>0&&evaluatedCount===subs.length&&!insightData&&!loading){
-      generateInsights()
-    }
+    if(evaluatedCount>0&&evaluatedCount===subs.length&&!insightData&&!loading){generateInsights()}
   },[evaluatedCount,subs.length])
 
   const MC={'Beginner':{bg:'#fee2e2',color:'#991b1b'},'Developing':{bg:'#fef3c7',color:'#854d0e'},'Intermediate':{bg:'#dbeafe',color:'#1e40af'},'Advanced':{bg:'#dcfce7',color:'#15803d'}}
-
   return(
     <div style={{padding:'16px 28px 40px'}}>
       <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'20px 24px',marginBottom:20,boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
-          <div>
-            <h2 style={{fontSize:17,fontWeight:800,color:BRAND.navy,margin:0,marginBottom:4}}>AI Adoption Insights</h2>
-            <p style={{fontSize:13,color:BRAND.textMuted,margin:0}}>
-              {loading?'Generating insights…':evaluatedCount>0?`Based on ${evaluatedCount} evaluated submissions · Auto-generates when evaluation completes`:'Evaluate submissions first'}
-            </p>
-          </div>
+          <div><h2 style={{fontSize:17,fontWeight:800,color:BRAND.navy,margin:0,marginBottom:4}}>AI Adoption Insights</h2>
+            <p style={{fontSize:13,color:BRAND.textMuted,margin:0}}>{loading?'Generating…':evaluatedCount>0?`Based on ${evaluatedCount} evaluated submissions · Auto-generates when evaluation completes`:'Evaluate submissions first'}</p></div>
           <div style={{display:'flex',gap:8}}>
-            {insightData&&<button onClick={()=>exportInsightsPDF(insightData,counts,subs,results)} style={{background:'#16a34a',color:'white',border:'none',borderRadius:10,padding:'9px 18px',fontSize:12,fontWeight:700,cursor:'pointer'}}>📄 Export PDF</button>}
+            {insightData&&<button onClick={()=>exportInsightsPDF(insightData,counts,uniqueCount,subs)} style={{background:'#16a34a',color:'white',border:'none',borderRadius:10,padding:'9px 18px',fontSize:12,fontWeight:700,cursor:'pointer'}}>📄 Export PDF</button>}
             <button onClick={generateInsights} disabled={loading||evaluatedCount===0}
               style={{background:loading||evaluatedCount===0?BRAND.border:`linear-gradient(135deg,${BRAND.navy},${BRAND.blue})`,color:loading||evaluatedCount===0?BRAND.textMuted:'white',border:'none',borderRadius:10,padding:'9px 18px',fontSize:12,fontWeight:700,cursor:loading||evaluatedCount===0?'not-allowed':'pointer',whiteSpace:'nowrap'}}>
               {loading?'⏳ Generating…':insightData?'↺ Regenerate':'✨ Generate'}
@@ -507,9 +436,7 @@ function InsightsTab({subs,results,insightData,setInsightData,counts}){
         </div>
         {error&&<div style={{background:'#fee2e2',color:'#991b1b',fontSize:12,padding:'8px 12px',borderRadius:8,marginTop:12,fontWeight:600}}>{error}</div>}
       </div>
-
-      {loading&&<div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}><SphereLoader current={0} total={0} label="Generating AI insights…"/></div>}
-
+      {loading&&<div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14}}><SphereLoader current={0} total={0} label="Generating AI insights…"/></div>}
       {insightData&&!loading&&(
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
           <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'24px 28px',boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
@@ -531,8 +458,7 @@ function InsightsTab({subs,results,insightData,setInsightData,counts}){
             <h3 style={{fontSize:15,fontWeight:800,color:BRAND.navy,marginBottom:12}}>📊 Breakdown by Function</h3>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
               {(insightData.functions||[]).map(fn=>{
-                const avgScore=parseFloat(fn.avg_ai_score)||0
-                const qPct=fn.submission_count?Math.round(fn.qualified_count/fn.submission_count*100):0
+                const avgScore=parseFloat(fn.avg_ai_score)||0;const qPct=fn.submission_count?Math.round(fn.qualified_count/fn.submission_count*100):0
                 return(
                   <div key={fn.name} style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:12,padding:'18px 20px',boxShadow:'0 1px 4px rgba(27,43,107,0.06)'}}>
                     <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:8}}>
@@ -583,24 +509,25 @@ export default function Home(){
   const[expanded,setExpanded]=useState({})
   const[expandedSummary,setExpandedSummary]=useState({})
   const[resubmitStatus,setResubmitStatus]=useState({})
+  const[manualOverrides,setManualOverrides]=useState({}) // {idx: {verdict, action}}
   const[activeTab,setActiveTab]=useState('submissions')
   const[insightData,setInsightData]=useState(null)
   const[modalIdx,setModalIdx]=useState(null)
   const fileRef=useRef()
   const countdown=getDeadlineCountdown()
 
+  // Load persisted data on mount
   useEffect(()=>{
     try{const s=localStorage.getItem(STORAGE_KEY);if(s)setResubmitStatus(JSON.parse(s))}catch(e){}
+    try{const s=localStorage.getItem(STORAGE_KEY+'_ov');if(s)setManualOverrides(JSON.parse(s))}catch(e){}
   },[])
 
-  // Save results to localStorage whenever they change
+  // Save results
   useEffect(()=>{
-    if(results.some(r=>r)){
-      try{localStorage.setItem(STORAGE_KEY+'_res',JSON.stringify(results))}catch(e){}
-    }
+    if(results.some(r=>r)){try{localStorage.setItem(STORAGE_KEY+'_res',JSON.stringify(results))}catch(e){}}
   },[results])
 
-  // Save subs/headers/fileName whenever they change
+  // Save subs/headers/fileName
   useEffect(()=>{
     if(subs.length>0){
       try{
@@ -615,45 +542,47 @@ export default function Home(){
     setResubmitStatus(prev=>{const next={...prev,[idx]:status};try{localStorage.setItem(STORAGE_KEY,JSON.stringify(next))}catch(e){};return next})
   }
 
+  function setManualOverride(idx,verdict,action){
+    setManualOverrides(prev=>{
+      const next={...prev,[idx]:{verdict,action:action||''}}
+      try{localStorage.setItem(STORAGE_KEY+'_ov',JSON.stringify(next))}catch(e){}
+      return next
+    })
+  }
+
+  function clearManualOverride(idx){
+    setManualOverrides(prev=>{
+      const next={...prev};delete next[idx]
+      try{localStorage.setItem(STORAGE_KEY+'_ov',JSON.stringify(next))}catch(e){}
+      return next
+    })
+  }
+
   function doLogin(e){
     e.preventDefault()
     if(loginUser.trim()===AUTH.username&&loginPass===AUTH.password){
       setLoginError('')
-      // Restore saved session from localStorage
       try{
         const savedSubs=localStorage.getItem(STORAGE_KEY+'_subs')
         const savedRes=localStorage.getItem(STORAGE_KEY+'_res')
         const savedHdrs=localStorage.getItem(STORAGE_KEY+'_hdrs')
         const savedFname=localStorage.getItem(STORAGE_KEY+'_fname')
         if(savedSubs&&savedHdrs){
-          const parsedSubs=JSON.parse(savedSubs)
-          const parsedHdrs=JSON.parse(savedHdrs)
+          const parsedSubs=JSON.parse(savedSubs);const parsedHdrs=JSON.parse(savedHdrs)
           const parsedRes=savedRes?JSON.parse(savedRes):new Array(parsedSubs.length).fill(null)
           if(parsedSubs.length>0){
-            setSubs(parsedSubs)
-            setOriginalHeaders(parsedHdrs)
+            setSubs(parsedSubs);setOriginalHeaders(parsedHdrs)
             setResults(parsedRes.length===parsedSubs.length?parsedRes:new Array(parsedSubs.length).fill(null))
-            setFileName(savedFname||'')
-            // Skip rocket + upload, go straight to main
-            setScreen('main')
-            return
+            setFileName(savedFname||'');setScreen('main');return
           }
         }
       }catch(e){}
-      // No saved session — show rocket then upload
       setShowRocket(true)
-    }
-    else setLoginError('Incorrect username or password.')
+    }else setLoginError('Incorrect username or password.')
   }
 
   function doLogout(){
-    // Clear all session data from localStorage
-    try{
-      localStorage.removeItem(STORAGE_KEY+'_subs')
-      localStorage.removeItem(STORAGE_KEY+'_res')
-      localStorage.removeItem(STORAGE_KEY+'_hdrs')
-      localStorage.removeItem(STORAGE_KEY+'_fname')
-    }catch(e){}
+    try{['_subs','_res','_hdrs','_fname'].forEach(k=>localStorage.removeItem(STORAGE_KEY+k))}catch(e){}
     setScreen('login');setLoginUser('');setLoginPass('')
     setSubs([]);setResults([]);setFileData(null);setFileName('')
     setOriginalHeaders([]);setOriginalRows([])
@@ -677,39 +606,36 @@ export default function Home(){
     const{rows,headers}=fileData
     const newMapped=rows.map(mapRow).filter(s=>s.email&&s.tool_name)
     const newRaw=rows.filter(r=>pick(r,'email')&&pick(r,'tool name','tool_name','nama tool','nama aplikasi'))
-
-    // Smart incremental: reuse existing results, only evaluate new/changed
-    let prevRes=[]
-    try{const saved=localStorage.getItem(STORAGE_KEY+'_res');if(saved)prevRes=JSON.parse(saved)}catch(e){}
-
-    // Build fingerprint map of previous evaluations
+    // Fingerprint-based incremental matching
     const prevFingerMap={}
     subs.forEach((s,i)=>{if(results[i])prevFingerMap[makeFingerprint(s)]=results[i]})
-    // Also check localStorage saved results matched to previous subs
-    if(prevRes.length&&subs.length===prevRes.length){
-      subs.forEach((s,i)=>{if(prevRes[i])prevFingerMap[makeFingerprint(s)]=prevRes[i]})
-    }
-
-    // Match new submissions to previous results
-    const matchedResults=newMapped.map(s=>{
-      const fp=makeFingerprint(s)
-      return prevFingerMap[fp]||null
-    })
-
+    try{
+      const saved=localStorage.getItem(STORAGE_KEY+'_res');const savedSubs=localStorage.getItem(STORAGE_KEY+'_subs')
+      if(saved&&savedSubs){const pr=JSON.parse(saved);const ps=JSON.parse(savedSubs);ps.forEach((s,i)=>{if(pr[i])prevFingerMap[makeFingerprint(s)]=pr[i]})}
+    }catch(e){}
+    const matchedResults=newMapped.map(s=>prevFingerMap[makeFingerprint(s)]||null)
     setSubs(newMapped);setOriginalRows(newRaw);setOriginalHeaders(headers)
-    setResults(matchedResults)
-    setExpanded({});setInsightData(null);setScreen('main')
+    setResults(matchedResults);setExpanded({});setInsightData(null);setScreen('main')
+  }
+
+  // Re-evaluate a single submission (for manual review marking)
+  async function reEvalOne(idx,context){
+    const s=subs[idx];if(!s)return
+    try{
+      const resp=await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submission:s,manualContext:context})})
+      const data=await resp.json()
+      if(data.error)throw new Error(data.error)
+      const newRes=[...results];newRes[idx]=data.result;setResults(newRes)
+    }catch(e){console.error(e)}
   }
 
   async function runEval(evalAll=false){
     if(running)return
     setRunning(true)
     const newRes=evalAll?new Array(subs.length).fill(null):[...results]
-    // Evaluate ALL subs (including duplicates) so "other submissions" panel has scores
     const toEval=subs.map((s,i)=>({s,i,needsEval:!newRes[i]})).filter(x=>x.needsEval)
     let done=newRes.filter(r=>r).length
     setProgress({done,total:subs.length})
-
     for(let batch=0;batch<toEval.length;batch+=3){
       const chunk=toEval.slice(batch,Math.min(batch+3,toEval.length))
       await Promise.all(chunk.map(async({s,i})=>{
@@ -719,7 +645,7 @@ export default function Home(){
           if(data.error)throw new Error(data.error)
           newRes[i]=data.result
         }catch(e){
-          newRes[i]={intent:'none',intent_reason:'Error',prompt:'none',prompt_reason:'Error',html:'none',html_reason:'Error',overall:'fail',summary:'Eval error: '+e.message,action:'Please resubmit — evaluation failed. Contact People Team.',ai_score:0,ai_score_reason:'Error'}
+          newRes[i]={intent:'none',intent_reason:'Error',prompt:'none',prompt_reason:'Error',html:'none',html_reason:'Error',verdict:'not_qualified',summary:'Eval error: '+e.message,action:'Please resubmit — evaluation failed.',ai_score:0,ai_score_reason:'Error'}
         }
         done++;setProgress({done,total:subs.length});setResults([...newRes])
       }))
@@ -729,99 +655,68 @@ export default function Home(){
   }
 
   function openAllEmails(){
-    const notQ=subs.filter((_,i)=>calcVerdict(results[i])==='not_qualified'&&results[i])
-    if(notQ.length===0){alert('No Not Qualified submissions to email.');return}
+    const notQ=subs.filter((_,i)=>{
+      const ov=manualOverrides[i]
+      const v=ov?.verdict||calcVerdict(results[i])
+      if(!results[i])return false
+      // Only email if explicitly not_qualified — exclude manual_review unless overridden to not_qualified
+      if(v==='not_qualified')return true
+      if(v==='manual_review'&&ov?.verdict==='not_qualified')return true
+      return false
+    })
+    if(notQ.length===0){alert('No submissions requiring action.');return}
     const count=Math.min(notQ.length,20)
-    if(notQ.length>20)alert(`Opening first 20 of ${notQ.length} emails to avoid browser blocking.`)
-    notQ.slice(0,count).forEach((s,idx)=>{const i=subs.indexOf(s);setTimeout(()=>window.open(makeGmailLink(s,results[i]),'_blank'),idx*350)})
+    if(notQ.length>20)alert(`Opening first 20 of ${notQ.length}`)
+    notQ.slice(0,count).forEach((s,idx)=>{const i=subs.indexOf(s);const ov=manualOverrides[i];setTimeout(()=>window.open(makeGmailLink(s,results[i],ov?.action),'_blank'),idx*350)})
   }
 
-  // ── Deduplication logic ────────────────────────────────────
-  // Group submissions by email, pick best per person
-  const dedupedData = useMemo(()=>{
-    // Group all subs by email
-    const byEmail = {}
-    subs.forEach((s,i)=>{
-      const email = s.email.toLowerCase()
-      if(!byEmail[email]) byEmail[email]=[]
-      byEmail[email].push({s,i,r:results[i]})
-    })
-
-    // For each email, pick the "primary" submission
-    // Priority: 1) Qualified, 2) most recent (highest index = latest in CSV)
-    const primaryIndexes = new Set()
-    const othersByPrimary = {} // primaryIdx -> [{s,i,r}]
-    const isResubmission = new Set() // indexes that are resubmissions
-
+  // ── Deduplication ──────────────────────────────────────────
+  const dedupedData=useMemo(()=>{
+    const byEmail={}
+    subs.forEach((s,i)=>{const email=s.email.toLowerCase();if(!byEmail[email])byEmail[email]=[];byEmail[email].push({s,i,r:results[i]})})
+    const primaryIndexes=new Set();const othersByPrimary={};const isResubmission=new Set()
     Object.values(byEmail).forEach(group=>{
-      if(group.length===1){
-        primaryIndexes.add(group[0].i)
-        return
-      }
-      // Sort: qualified first, then by index desc (most recent)
+      if(group.length===1){primaryIndexes.add(group[0].i);return}
       const sorted=[...group].sort((a,b)=>{
-        const av=calcVerdict(a.r); const bv=calcVerdict(b.r)
+        const av=manualOverrides[a.i]?.verdict||calcVerdict(a.r);const bv=manualOverrides[b.i]?.verdict||calcVerdict(b.r)
         if(av==='qualified'&&bv!=='qualified')return -1
         if(bv==='qualified'&&av!=='qualified')return 1
-        return b.i-a.i // most recent
+        return b.i-a.i
       })
-      const primary=sorted[0]
-      primaryIndexes.add(primary.i)
-      // Others = non-primary
-      const others=sorted.slice(1)
-      othersByPrimary[primary.i]=others
-      // Tag as resubmission if primary is newer AND any older one was not_qualified
-      const olderNotQual=others.some(x=>calcVerdict(x.r)==='not_qualified')
-      if(olderNotQual&&primary.i>Math.min(...others.map(x=>x.i))){
-        isResubmission.add(primary.i)
-      }
+      const primary=sorted[0];primaryIndexes.add(primary.i)
+      const others=sorted.slice(1);othersByPrimary[primary.i]=others
+      const olderNotQual=others.some(x=>{const v=manualOverrides[x.i]?.verdict||calcVerdict(x.r);return v==='not_qualified'||v==='manual_review'})
+      if(olderNotQual&&primary.i>Math.min(...others.map(x=>x.i)))isResubmission.add(primary.i)
     })
-
     return{primaryIndexes,othersByPrimary,isResubmission,byEmail}
-  },[subs,results])
+  },[subs,results,manualOverrides])
 
   const{primaryIndexes,othersByPrimary,isResubmission}=dedupedData
 
-  // Counts based on unique submitters (primary only)
   const counts=useMemo(()=>{
-    const c={qualified:0,not_qualified:0,pending:0}
-    primaryIndexes.forEach(i=>{
-      const v=calcVerdict(results[i])
-      c[v]=(c[v]||0)+1
-    })
+    const c={qualified:0,manual_review:0,not_qualified:0,pending:0}
+    primaryIndexes.forEach(i=>{const v=manualOverrides[i]?.verdict||calcVerdict(results[i]);c[v]=(c[v]||0)+1})
     return c
-  },[primaryIndexes,results])
+  },[primaryIndexes,results,manualOverrides])
 
   const uniqueCount=primaryIndexes.size
+  const newCount=Array.from(primaryIndexes).filter(i=>!results[i]).length
 
   const visible=useMemo(()=>subs.filter((s,i)=>{
-    if(!primaryIndexes.has(i))return false // hide non-primary duplicates
-    const v=calcVerdict(results[i])
+    if(!primaryIndexes.has(i))return false
+    const v=manualOverrides[i]?.verdict||calcVerdict(results[i])
     if(filter!=='all'&&v!==filter)return false
     if(search)return(getName(s.email)+s.email+s.dept+s.tool_name).toLowerCase().includes(search.toLowerCase())
     return true
-  }),[subs,results,filter,search,primaryIndexes])
-
-  const newCount=Array.from(primaryIndexes).filter(i=>!results[i]).length
+  }),[subs,results,filter,search,primaryIndexes,manualOverrides])
 
   // ── Login ─────────────────────────────────────────────────
   if(showRocket)return<RocketTransition onDone={()=>{setShowRocket(false);setScreen('upload')}}/>
   if(screen==='login')return(
     <div style={{minHeight:'100vh',background:`linear-gradient(135deg,${BRAND.navy} 0%,${BRAND.blue} 60%,${BRAND.lightBlue} 100%)`,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',position:'relative',overflow:'hidden'}}>
-      <style>{`
-        @keyframes twinkle{0%,100%{opacity:0.15;transform:scale(0.8)}50%{opacity:1;transform:scale(1.2)}}
-        @keyframes planetFloat{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-8px) scale(1.02)}}
-        @keyframes floatUp{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
-        input::placeholder{color:rgba(107,123,173,0.7)!important}
-      `}</style>
-      {/* Pre-calculated planets */}
-      {PLANET_DATA.map((p,i)=>(
-        <div key={i} style={{position:'absolute',width:p.size,height:p.size,borderRadius:'50%',left:`${p.l}%`,top:`${p.t}%`,background:`radial-gradient(circle at 35% 35%, hsla(${p.hue},80%,80%,0.3), hsla(${p.hue},70%,50%,0.15))`,border:`1px solid hsla(${p.hue},70%,70%,0.2)`,animation:`planetFloat ${p.dur}s ease-in-out ${p.del}s infinite`}}></div>
-      ))}
-      {/* Pre-calculated stars */}
-      {STAR_DATA.map((s,i)=>(
-        <div key={i} style={{position:'absolute',width:s.w,height:s.h,borderRadius:'50%',background:'rgba(255,255,255,0.8)',left:`${s.l}%`,top:`${s.t}%`,animation:`twinkle ${s.d}s ease-in-out ${s.del}s infinite`}}></div>
-      ))}
+      <style>{`@keyframes twinkle{0%,100%{opacity:0.15;transform:scale(0.8)}50%{opacity:1;transform:scale(1.2)}}@keyframes planetFloat{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-8px) scale(1.02)}}@keyframes floatUp{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}input::placeholder{color:rgba(107,123,173,0.7)!important}`}</style>
+      {PLANET_DATA.map((p,i)=><div key={i} style={{position:'absolute',width:p.size,height:p.size,borderRadius:'50%',left:`${p.l}%`,top:`${p.t}%`,background:`radial-gradient(circle at 35% 35%,hsla(${p.hue},80%,80%,0.3),hsla(${p.hue},70%,50%,0.15))`,border:`1px solid hsla(${p.hue},70%,70%,0.2)`,animation:`planetFloat ${p.dur}s ease-in-out ${p.del}s infinite`}}></div>)}
+      {STAR_DATA.map((s,i)=><div key={i} style={{position:'absolute',width:s.w,height:s.h,borderRadius:'50%',background:'rgba(255,255,255,0.8)',left:`${s.l}%`,top:`${s.t}%`,animation:`twinkle ${s.d}s ease-in-out ${s.del}s infinite`}}></div>)}
       <div style={{display:'flex',alignItems:'flex-end',gap:40,maxWidth:820,width:'100%',padding:'0 24px',position:'relative',zIndex:1}}>
         <div style={{flexShrink:0,animation:'floatUp 3s ease-in-out infinite'}}><img src={MASCOT_RUNNING} alt="Astro" style={{width:200,filter:'drop-shadow(0 8px 24px rgba(0,0,0,0.35))'}}/></div>
         <div style={{flex:1,background:'white',borderRadius:20,padding:'40px',boxShadow:'0 24px 64px rgba(0,0,0,0.25)'}}>
@@ -853,6 +748,7 @@ export default function Home(){
       <div style={{background:`linear-gradient(135deg,${BRAND.navy} 0%,${BRAND.blue} 100%)`,padding:'16px 32px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
         <div style={{display:'flex',alignItems:'center',gap:12}}><img src={MASCOT_BOXING} alt="" style={{width:40,height:40,objectFit:'contain'}}/><div><div style={{color:'white',fontWeight:800,fontSize:15}}>Personal AI Challenge</div><div style={{color:'rgba(255,255,255,0.6)',fontSize:11}}>Submission Evaluator · People Team</div></div></div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          {subs.length>0&&<button onClick={()=>setScreen('main')} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'white',borderRadius:8,padding:'6px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>← Back to Dashboard</button>}
           <div style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.25)',borderRadius:8,padding:'5px 12px',fontSize:11,color:'white',fontWeight:600}}>⏰ {countdown.text}</div>
           <button onClick={doLogout} style={{background:'rgba(220,50,50,0.3)',border:'1px solid rgba(255,100,80,0.5)',color:'white',borderRadius:8,padding:'6px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>Sign Out</button>
         </div>
@@ -860,8 +756,8 @@ export default function Home(){
       <div style={{maxWidth:580,margin:'60px auto',padding:'0 24px'}}>
         <div style={{background:'white',borderRadius:16,border:`1px solid ${BRAND.border}`,padding:36,boxShadow:'0 4px 24px rgba(27,43,107,0.08)'}}>
           <h2 style={{fontSize:18,fontWeight:800,color:BRAND.navy,marginBottom:6}}>Upload Submissions</h2>
-          <p style={{fontSize:13,color:BRAND.textMuted,marginBottom:6}}>Upload a new or updated Google Form response file. Your previous evaluation results will be matched and preserved automatically.</p>
-          {subs.length>0&&<div style={{background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#1e40af',fontWeight:600,marginBottom:16}}>ℹ️ {results.filter(r=>r).length} results saved. New submissions will be detected automatically.</div>}
+          <p style={{fontSize:13,color:BRAND.textMuted,marginBottom:6}}>Upload a new or updated Google Form response file. Previous evaluation results will be matched and preserved automatically.</p>
+          {subs.length>0&&<div style={{background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#1e40af',fontWeight:600,marginBottom:16}}>ℹ️ {results.filter(r=>r).length} results saved — new submissions will be detected automatically.</div>}
           <div style={{border:`2px dashed ${drag?BRAND.blue:BRAND.border}`,borderRadius:12,padding:32,textAlign:'center',cursor:'pointer',background:drag?'#EEF4FF':BRAND.bgLight,transition:'all 0.2s'}}
             onClick={()=>fileRef.current.click()} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)}
             onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0])}}>
@@ -883,7 +779,7 @@ export default function Home(){
   // ── Main Dashboard ────────────────────────────────────────
   return(
     <div style={{minHeight:'100vh',background:BRAND.bgPage,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
-      {modalIdx!==null&&<SubmissionModal s={subs[modalIdx]} r={results[modalIdx]} idx={modalIdx} onClose={()=>setModalIdx(null)}/>}
+      {modalIdx!==null&&<SubmissionModal s={subs[modalIdx]} r={results[modalIdx]} idx={modalIdx} override={manualOverrides[modalIdx]} onClose={()=>setModalIdx(null)}/>}
 
       {/* Header */}
       <div style={{background:`linear-gradient(135deg,${BRAND.navy} 0%,${BRAND.blue} 100%)`,padding:'14px 28px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
@@ -892,7 +788,7 @@ export default function Home(){
           {activeTab==='submissions'&&<>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, function…"
               style={{border:'1.5px solid rgba(255,255,255,0.5)',borderRadius:8,padding:'7px 12px',fontSize:12,outline:'none',width:210,background:'rgba(255,255,255,0.2)',color:'white',WebkitTextFillColor:'white'}}/>
-            <button onClick={()=>exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus)} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>⬇ Export Excel</button>
+            <button onClick={()=>exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus,manualOverrides)} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>⬇ Export Excel</button>
             <button onClick={openAllEmails} style={{background:'rgba(59,130,246,0.3)',border:'1px solid rgba(59,130,246,0.5)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>✉️ Email All ({counts.not_qualified||0})</button>
             <button onClick={()=>setScreen('upload')} style={{background:'rgba(255,255,255,0.1)',border:'1px solid rgba(255,255,255,0.2)',color:'white',borderRadius:8,padding:'7px 12px',fontSize:12,cursor:'pointer'}}>↩ Change File</button>
           </>}
@@ -901,22 +797,23 @@ export default function Home(){
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Stats — 5 cards including Manual Review */}
       <div style={{display:'flex',gap:10,padding:'16px 28px',flexWrap:'wrap',alignItems:'center'}}>
         {[
           {label:'Total Submissions',val:subs.length,color:'#475569',sub:null},
           {label:'Unique Submitters',val:uniqueCount,color:BRAND.navy,sub:subs.length>uniqueCount?`${subs.length-uniqueCount} duplicate${subs.length-uniqueCount>1?'s':''}`:null},
           {label:'Qualified ✅',val:counts.qualified||'—',color:'#16a34a',sub:null},
+          {label:'⚠️ Manual Review',val:counts.manual_review||'—',color:'#c2410c',sub:counts.manual_review>0?'Needs human check':null,highlight:counts.manual_review>0},
           {label:'Not Qualified 🔄',val:counts.not_qualified||'—',color:'#dc2626',sub:null},
           {label:'Pending ⏳',val:counts.pending||0,color:'#94a3b8',sub:null},
         ].map(s=>(
-          <div key={s.label} style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:12,padding:'12px 18px',textAlign:'center',minWidth:105,boxShadow:'0 1px 4px rgba(27,43,107,0.06)'}}>
+          <div key={s.label} style={{background:'white',border:`1.5px solid ${s.highlight?'#fb923c':BRAND.border}`,borderRadius:12,padding:'12px 18px',textAlign:'center',minWidth:105,boxShadow:s.highlight?'0 0 0 3px rgba(251,146,60,0.2)':'0 1px 4px rgba(27,43,107,0.06)'}}>
             <div style={{fontSize:24,fontWeight:800,color:s.color}}>{s.val}</div>
-            <div style={{fontSize:10,color:BRAND.textMuted,textTransform:'uppercase',letterSpacing:0.4,marginTop:2}}>{s.label}</div>
-            {s.sub&&<div style={{fontSize:10,color:'#f59e0b',fontWeight:600,marginTop:2}}>{s.sub}</div>}
+            <div style={{fontSize:10,color:s.highlight?'#c2410c':BRAND.textMuted,textTransform:'uppercase',letterSpacing:0.4,marginTop:2,fontWeight:s.highlight?700:400}}>{s.label}</div>
+            {s.sub&&<div style={{fontSize:10,color:s.highlight?'#c2410c':'#f59e0b',fontWeight:700,marginTop:2}}>{s.sub}</div>}
           </div>
         ))}
-        <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10}}>
+        <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
           {running&&<div style={{display:'flex',alignItems:'center',gap:8}}><div style={{background:BRAND.border,borderRadius:10,height:6,width:140}}><div style={{background:`linear-gradient(90deg,${BRAND.lightBlue},${BRAND.blue})`,borderRadius:10,height:6,width:`${progress.total?Math.round(progress.done/progress.total*100):0}%`,transition:'width 0.3s'}}></div></div><span style={{fontSize:12,color:BRAND.textMuted,whiteSpace:'nowrap'}}>{progress.done}/{progress.total}</span></div>}
           {!running&&<>
             <button onClick={()=>runEval(false)} disabled={newCount===0}
@@ -928,7 +825,7 @@ export default function Home(){
               ↺ Evaluate All
             </button>
           </>}
-          {running&&<button disabled style={{background:'#e2e8f0',color:BRAND.textMuted,border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'not-allowed',whiteSpace:'nowrap'}}>⏳ Evaluating…</button>}
+          {running&&<button disabled style={{background:'#e2e8f0',color:BRAND.textMuted,border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'not-allowed'}}>⏳ Evaluating…</button>}
         </div>
       </div>
 
@@ -937,28 +834,29 @@ export default function Home(){
         {[{val:'submissions',label:'📋 Submissions'},{val:'insights',label:'✨ AI Insights'},{val:'top',label:'🏆 Top Submissions'}].map(t=>(
           <button key={t.val} onClick={()=>setActiveTab(t.val)}
             style={{padding:'10px 20px',border:'none',borderBottom:`3px solid ${activeTab===t.val?BRAND.blue:'transparent'}`,background:'none',color:activeTab===t.val?BRAND.blue:BRAND.textMuted,fontWeight:activeTab===t.val?700:400,fontSize:13,cursor:'pointer',transition:'all 0.15s'}}>
-            {t.label}
+            {t.label}{t.val==='submissions'&&counts.manual_review>0?<span style={{marginLeft:6,background:'#fb923c',color:'white',fontSize:10,fontWeight:800,padding:'1px 6px',borderRadius:8}}>{counts.manual_review}</span>:null}
           </button>
         ))}
       </div>
 
-      {/* Loader */}
       {running&&<div style={{margin:'16px 28px 0',background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,boxShadow:'0 2px 12px rgba(27,43,107,0.08)'}}><SphereLoader current={progress.done} total={progress.total}/></div>}
 
-      {/* Top Submissions Tab */}
-      {activeTab==='top'&&<div style={{padding:'16px 28px 40px'}}><TopSubmissions subs={subs} results={results} onSelect={setModalIdx}/></div>}
+      {activeTab==='top'&&<div style={{padding:'16px 28px 40px'}}><TopSubmissions subs={subs} results={results} manualOverrides={manualOverrides} onSelect={setModalIdx}/></div>}
+      {activeTab==='insights'&&<InsightsTab subs={subs} results={results} insightData={insightData} setInsightData={setInsightData} counts={counts} uniqueCount={uniqueCount} manualOverrides={manualOverrides}/>}
 
-      {/* Insights Tab */}
-      {activeTab==='insights'&&<InsightsTab subs={subs} results={results} insightData={insightData} setInsightData={setInsightData} counts={counts}/>}
-
-      {/* Submissions Tab */}
       {activeTab==='submissions'&&(
         <div style={{padding:'16px 28px 40px'}}>
           <LegendCard/>
           <div style={{display:'flex',gap:7,alignItems:'center',flexWrap:'wrap',padding:'6px 0 10px'}}>
             <span style={{fontSize:12,color:BRAND.textMuted,marginRight:2}}>Filter:</span>
-            {[{val:'all',label:`All (${uniqueCount} unique)`},{val:'qualified',label:`✅ Qualified (${counts.qualified||0})`},{val:'not_qualified',label:`🔄 Not Qualified (${counts.not_qualified||0})`},{val:'pending',label:`⏳ Pending (${counts.pending||0})`}].map(f=>(
-              <button key={f.val} onClick={()=>setFilter(f.val)} style={{border:`1.5px solid ${filter===f.val?BRAND.blue:BRAND.border}`,background:filter===f.val?BRAND.blue:'white',padding:'5px 14px',borderRadius:20,fontSize:12,cursor:'pointer',color:filter===f.val?'white':BRAND.textMuted,fontWeight:filter===f.val?700:400}}>{f.label}</button>
+            {[
+              {val:'all',label:`All (${uniqueCount} unique)`},
+              {val:'qualified',label:`✅ Qualified (${counts.qualified||0})`},
+              {val:'manual_review',label:`⚠️ Manual Review (${counts.manual_review||0})`,highlight:counts.manual_review>0},
+              {val:'not_qualified',label:`🔄 Not Qualified (${counts.not_qualified||0})`},
+              {val:'pending',label:`⏳ Pending (${counts.pending||0})`},
+            ].map(f=>(
+              <button key={f.val} onClick={()=>setFilter(f.val)} style={{border:`1.5px solid ${filter===f.val?(f.highlight?'#fb923c':BRAND.blue):f.highlight?'#fed7aa':BRAND.border}`,background:filter===f.val?(f.highlight?'#fb923c':BRAND.blue):'white',padding:'5px 14px',borderRadius:20,fontSize:12,cursor:'pointer',color:filter===f.val?'white':f.highlight?'#c2410c':BRAND.textMuted,fontWeight:filter===f.val?700:f.highlight?700:400}}>{f.label}</button>
             ))}
           </div>
 
@@ -969,24 +867,27 @@ export default function Home(){
             <tbody>
               {visible.length===0&&<tr><td colSpan={11} style={{textAlign:'center',padding:40,color:BRAND.textMuted,fontSize:13}}>No submissions match this filter.</td></tr>}
               {visible.map(s=>{
-                const i=subs.indexOf(s);const r=results[i];const verdict=calcVerdict(r)
+                const i=subs.indexOf(s);const r=results[i]
+                const override=manualOverrides[i]
+                const verdict=override?.verdict||calcVerdict(r)
+                const isManual=verdict==='manual_review'
                 const isExp=expanded[i];const isSumExp=expandedSummary[i]
                 const name=getName(s.email);const htmlUp=hasHtmlFile(s);const deployed=hasDeployedLink(s)
                 const probIsLink=looksLikeLinkOnly(s.problem);const howIsLink=looksLikeLinkOnly(s.how)
                 const rsStatus=resubmitStatus[i]||'pending'
                 const summaryText=r?.summary||'';const summaryShort=summaryText.length>90?summaryText.substring(0,90)+'…':summaryText
-                const others=othersByPrimary[i]||[]
-                const isResub=isResubmission.has(i)
-                const othersExpKey=`others_${i}`
-                const isOthersExp=expanded[othersExpKey]
+                const others=othersByPrimary[i]||[];const isResub=isResubmission.has(i)
+                const othersExpKey=`others_${i}`;const isOthersExp=expanded[othersExpKey]
+
                 return[
-                  <tr key={`r${i}`} style={{cursor:'pointer',borderBottom:`1px solid ${BRAND.border}`}} onClick={()=>setExpanded(p=>({...p,[i]:!p[i]}))}>
+                  <tr key={`r${i}`} style={{cursor:'pointer',borderBottom:`1px solid ${BRAND.border}`,borderLeft:isManual?'4px solid #fb923c':'4px solid transparent'}} onClick={()=>setExpanded(p=>({...p,[i]:!p[i]}))}>
                     <td style={{padding:'10px 13px',color:'#ccc',fontSize:12}}>{i+1}</td>
                     <td style={{padding:'10px 13px'}}>
                       <div style={{fontWeight:600,color:BRAND.navy,maxWidth:110,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>
                       <div style={{color:BRAND.textMuted,fontSize:11,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.email}</div>
                       <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:3}}>
                         {isResub&&<span style={{fontSize:9,fontWeight:700,background:'#dbeafe',color:'#1e40af',padding:'1px 6px',borderRadius:6,whiteSpace:'nowrap'}}>🔄 Resubmission</span>}
+                        {override&&<span style={{fontSize:9,fontWeight:700,background:'#f3e8ff',color:'#7c3aed',padding:'1px 6px',borderRadius:6,whiteSpace:'nowrap'}}>✏️ Override</span>}
                         {others.length>0&&<span style={{fontSize:9,fontWeight:700,background:'#f1f5f9',color:'#64748b',padding:'1px 6px',borderRadius:6,whiteSpace:'nowrap'}}>+{others.length} more</span>}
                       </div>
                     </td>
@@ -1001,30 +902,70 @@ export default function Home(){
                       <div style={{display:'flex',flexDirection:'column',gap:3}}>
                         {htmlUp?<a href={s.html_file} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:11,color:BRAND.blue,fontWeight:600,whiteSpace:'nowrap'}}>📁 HTML File</a>:<span style={{fontSize:10,color:'#b45309',background:'#fef3c7',padding:'1px 6px',borderRadius:6,fontWeight:600,whiteSpace:'nowrap'}}>⚠️ No HTML Upload</span>}
                         {deployed&&<a href={s.deployed} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:11,color:'#16a34a',fontWeight:600,whiteSpace:'nowrap'}}>🚀 Live App</a>}
+                        {!htmlUp&&!deployed&&s.demo?.startsWith('http')&&<a href={s.demo} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:11,color:'#7c3aed',fontWeight:600,whiteSpace:'nowrap'}}>📹 Demo Only</a>}
                       </div>
                     </td>
-                    <td style={{padding:'10px 13px'}}><VerdictBadge verdict={verdict}/></td>
+                    <td style={{padding:'10px 13px'}}><VerdictBadge verdict={verdict} large={isManual}/></td>
                     <td style={{padding:'10px 13px'}}>{r?<div><ScorePill score={r.intent} label="Intent"/><ScorePill score={r.prompt} label="Prompt"/><ScorePill score={r.html} label="HTML"/></div>:<span style={{color:'#ddd',fontSize:11}}>—</span>}</td>
                     <td style={{padding:'10px 13px'}}>{r?<StarScore score={r.ai_score}/>:<span style={{color:'#ddd',fontSize:11}}>—</span>}</td>
                     <td style={{padding:'10px 13px'}} onClick={e=>e.stopPropagation()}>
-                      {verdict==='not_qualified'?<select value={rsStatus} onChange={e=>setResubmit(i,e.target.value)} style={{fontSize:11,border:`1px solid ${BRAND.border}`,borderRadius:6,padding:'3px 6px',background:'white',color:BRAND.navy,cursor:'pointer'}}><option value="pending">⏳ Pending</option><option value="resubmitted">📬 Resubmitted</option><option value="confirmed">✅ Confirmed</option></select>:<span style={{fontSize:11,color:'#ccc'}}>—</span>}
+                      {(verdict==='not_qualified'||verdict==='manual_review')?
+                        <select value={rsStatus} onChange={e=>setResubmit(i,e.target.value)} style={{fontSize:11,border:`1px solid ${BRAND.border}`,borderRadius:6,padding:'3px 6px',background:'white',color:BRAND.navy,cursor:'pointer'}}>
+                          <option value="pending">⏳ Pending</option>
+                          <option value="resubmitted">📬 Resubmitted</option>
+                          <option value="confirmed">✅ Confirmed</option>
+                        </select>
+                        :<span style={{fontSize:11,color:'#ccc'}}>—</span>}
                     </td>
                     <td style={{padding:'10px 13px'}}><span style={{fontSize:11,color:BRAND.blue}}>{isExp?'▲':'▼'}</span></td>
                   </tr>,
                   isExp&&(
                     <tr key={`d${i}`}>
-                      <td colSpan={11} style={{background:BRAND.bgLight,padding:'16px 16px 20px',borderBottom:`1px solid ${BRAND.border}`}}>
+                      <td colSpan={11} style={{background:BRAND.bgLight,padding:'16px 16px 20px',borderBottom:`1px solid ${BRAND.border}`,borderLeft:isManual?'4px solid #fb923c':'4px solid transparent'}}>
+
+                        {/* Manual Review action panel — prominent */}
+                        {isManual&&!override&&(
+                          <div style={{background:'#fff7ed',border:'2px solid #fb923c',borderRadius:12,padding:'16px 18px',marginBottom:14,boxShadow:'0 2px 8px rgba(251,146,60,0.2)'}}>
+                            <div style={{fontSize:13,fontWeight:800,color:'#c2410c',marginBottom:4}}>⚠️ Manual Review Required</div>
+                            <div style={{fontSize:12,color:'#92400e',lineHeight:1.5,marginBottom:12}}>{r?.action||'This submission requires human verification. Please review the demo/documents and make a decision.'}</div>
+                            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                              {s.demo?.startsWith('http')&&<a href={s.demo} target="_blank" rel="noreferrer" style={{fontSize:12,color:'#7c3aed',fontWeight:700,textDecoration:'none',background:'#f3e8ff',padding:'5px 12px',borderRadius:8,border:'1px solid #c4b5fd'}}>📹 View Demo/Evidence</a>}
+                              {probIsLink&&<a href={s.problem} target="_blank" rel="noreferrer" style={{fontSize:12,color:'#0369a1',fontWeight:700,textDecoration:'none',background:'#e0f2fe',padding:'5px 12px',borderRadius:8,border:'1px solid #7dd3fc'}}>📄 View Problem Doc</a>}
+                              {howIsLink&&<a href={s.how} target="_blank" rel="noreferrer" style={{fontSize:12,color:'#0369a1',fontWeight:700,textDecoration:'none',background:'#e0f2fe',padding:'5px 12px',borderRadius:8,border:'1px solid #7dd3fc'}}>📄 View How It Works Doc</a>}
+                            </div>
+                            <div style={{display:'flex',gap:10,marginTop:12}}>
+                              <button onClick={e=>{e.stopPropagation();setManualOverride(i,'qualified','')}} style={{background:'#16a34a',color:'white',border:'none',borderRadius:8,padding:'8px 18px',fontSize:12,fontWeight:800,cursor:'pointer'}}>✅ Mark as Qualified</button>
+                              <button onClick={e=>{e.stopPropagation();setManualOverride(i,'not_qualified',r?.action||'Please provide complete submission with text descriptions. Resubmit by 1 June 2026 via https://bit.ly/AstroPersonalAI')}} style={{background:'#dc2626',color:'white',border:'none',borderRadius:8,padding:'8px 18px',fontSize:12,fontWeight:800,cursor:'pointer'}}>❌ Mark as Not Qualified</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Override status */}
+                        {override&&(
+                          <div style={{background:override.verdict==='qualified'?'#dcfce7':'#fee2e2',border:`1.5px solid ${override.verdict==='qualified'?'#86efac':'#fca5a5'}`,borderRadius:10,padding:'10px 14px',marginBottom:12,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+                            <div style={{fontSize:12,fontWeight:700,color:override.verdict==='qualified'?'#15803d':'#991b1b'}}>
+                              ✏️ Manually overridden: {override.verdict==='qualified'?'Qualified':'Not Qualified'} by People Team
+                            </div>
+                            <button onClick={e=>{e.stopPropagation();clearManualOverride(i)}} style={{background:'none',border:'1px solid currentColor',borderRadius:6,padding:'3px 10px',fontSize:11,cursor:'pointer',color:'#64748b'}}>↺ Undo Override</button>
+                          </div>
+                        )}
+
+                        {/* What this tool does */}
                         <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px',marginBottom:10}}>
                           <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,fontWeight:700,marginBottom:6}}>What This Tool Does</div>
                           <div style={{fontSize:13,color:BRAND.navy,fontWeight:700,marginBottom:6}}>{s.tool_name}</div>
                           {r?.summary&&<div style={{fontSize:12,color:'#444',lineHeight:1.6,marginBottom:6}}>{r.summary}</div>}
                           {s.how&&!howIsLink&&<div style={{fontSize:12,color:'#666',lineHeight:1.5}}><strong>How it works:</strong> {s.how}</div>}
-                          {howIsLink&&<div style={{fontSize:12,color:'#0369a1'}}>🔗 Description in <a href={s.how} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>external document</a> — manual review recommended.</div>}
+                          {howIsLink&&<div style={{fontSize:12,color:'#0369a1'}}>🔗 Description in <a href={s.how} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>external document</a> — review recommended.</div>}
                         </div>
+
+                        {/* Problem */}
                         <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px',marginBottom:10}}>
                           <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,fontWeight:700,marginBottom:6}}>Problem Stated</div>
-                          {probIsLink?<div style={{fontSize:12,color:'#0369a1'}}>🔗 Problem in <a href={s.problem} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>external document</a> — manual review recommended.</div>:<div style={{fontSize:12,color:'#444',lineHeight:1.6}}>{s.problem||'—'}</div>}
+                          {probIsLink?<div style={{fontSize:12,color:'#0369a1'}}>🔗 Problem in <a href={s.problem} target="_blank" rel="noreferrer" style={{color:'#0369a1'}}>external document</a> — review recommended.</div>:<div style={{fontSize:12,color:'#444',lineHeight:1.6}}>{s.problem||'—'}</div>}
                         </div>
+
+                        {/* Scores */}
                         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:10,marginBottom:10}}>
                           {[['Clear Intent','intent','intent_reason'],['Multi-Conv. Prompt','prompt','prompt_reason'],['Working HTML/App','html','html_reason']].map(([lbl,sk,rk])=>(
                             <div key={sk} style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px'}}>
@@ -1039,16 +980,31 @@ export default function Home(){
                             <div style={{fontSize:12,color:'#555',lineHeight:1.45,marginTop:6}}>{r?r.ai_score_reason:'—'}</div>
                           </div>
                         </div>
+
                         {!htmlUp&&deployed&&<div style={{background:'#fffbeb',border:'1px solid #fed7aa',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#92400e',marginBottom:8}}><strong>⚠️ Note:</strong> No HTML on Drive — scored on deployed app.</div>}
-                        {r?.action&&verdict!=='qualified'&&<div style={{background:'#fff8ee',border:'1px solid #fed7aa',borderRadius:10,padding:'10px 14px',fontSize:12,color:'#92400e',lineHeight:1.5,marginBottom:8}}><strong>🔧 Action Required:</strong> {r.action}</div>}
+
+                        {(override?.action||r?.action)&&verdict!=='qualified'&&(
+                          <div style={{background:'#fff8ee',border:'1px solid #fed7aa',borderRadius:10,padding:'10px 14px',fontSize:12,color:'#92400e',lineHeight:1.5,marginBottom:8}}>
+                            <strong>🔧 Action Required:</strong> {override?.action||r?.action}
+                          </div>
+                        )}
+
                         <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',marginTop:8,marginBottom:others.length>0?12:0}}>
                           {htmlUp&&<a href={s.html_file} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📁 HTML File</a>}
                           {deployed&&<a href={s.deployed} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#16a34a',textDecoration:'none',fontWeight:600}}>🚀 Live App</a>}
-                          {s.demo?.startsWith('http')&&<a href={s.demo} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📸 Demo</a>}
-                          {r&&verdict!=='qualified'&&<a href={makeGmailLink(s,r)} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{padding:'5px 12px',fontSize:11,fontWeight:700,borderRadius:8,cursor:'pointer',border:`1px solid ${BRAND.blue}`,background:'#eff6ff',color:BRAND.blue,textDecoration:'none'}}>✉️ Draft Email to {getName(s.email).split(' ')[0]}</a>}
+                          {s.demo?.startsWith('http')&&<a href={s.demo} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#7c3aed',textDecoration:'none',fontWeight:600}}>📹 Demo</a>}
+                          {r&&verdict!=='qualified'&&<a href={makeGmailLink(s,r,override?.action)} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{padding:'5px 12px',fontSize:11,fontWeight:700,borderRadius:8,border:`1px solid ${BRAND.blue}`,background:'#eff6ff',color:BRAND.blue,textDecoration:'none'}}>✉️ Draft Email to {getName(s.email).split(' ')[0]}</a>}
+                          {/* Allow manual override from non-manual rows too */}
+                          {!isManual&&!override&&verdict==='not_qualified'&&(
+                            <button onClick={e=>{e.stopPropagation();setManualOverride(i,'qualified','')}} style={{background:'none',border:'1px solid #16a34a',color:'#16a34a',borderRadius:8,padding:'4px 10px',fontSize:11,cursor:'pointer',fontWeight:600}}>✅ Override: Qualified</button>
+                          )}
+                          {!isManual&&!override&&verdict==='qualified'&&(
+                            <button onClick={e=>{e.stopPropagation();setManualOverride(i,'not_qualified',r?.action||'Manually marked as not qualified.')}} style={{background:'none',border:'1px solid #dc2626',color:'#dc2626',borderRadius:8,padding:'4px 10px',fontSize:11,cursor:'pointer',fontWeight:600}}>❌ Override: Not Qualified</button>
+                          )}
+                          {override&&<button onClick={e=>{e.stopPropagation();clearManualOverride(i)}} style={{background:'none',border:`1px solid ${BRAND.border}`,color:BRAND.textMuted,borderRadius:8,padding:'4px 10px',fontSize:11,cursor:'pointer'}}>↺ Undo Override</button>}
                         </div>
 
-                        {/* Other submissions by same person */}
+                        {/* Other submissions */}
                         {others.length>0&&(
                           <div style={{borderTop:`1px solid ${BRAND.border}`,paddingTop:10}}>
                             <button onClick={e=>{e.stopPropagation();setExpanded(p=>({...p,[othersExpKey]:!p[othersExpKey]}))}}
@@ -1058,24 +1014,21 @@ export default function Home(){
                             {isOthersExp&&(
                               <div style={{display:'flex',flexDirection:'column',gap:8}}>
                                 {others.map(({s:os,i:oi,r:or})=>{
-                                  const ov=calcVerdict(or)
+                                  const ov2=manualOverrides[oi];const ov2v=ov2?.verdict||calcVerdict(or)
                                   const ohtmlUp=hasHtmlFile(os);const odeployed=hasDeployedLink(os)
                                   return(
                                     <div key={oi} style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px'}}>
                                       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10,flexWrap:'wrap',marginBottom:6}}>
-                                        <div>
-                                          <div style={{fontSize:12,fontWeight:700,color:BRAND.navy,marginBottom:2}}>{os.tool_name}</div>
-                                          <div style={{fontSize:11,color:BRAND.textMuted}}>Submission #{oi+1}</div>
-                                        </div>
-                                        <VerdictBadge verdict={ov}/>
+                                        <div><div style={{fontSize:12,fontWeight:700,color:BRAND.navy,marginBottom:2}}>{os.tool_name}</div><div style={{fontSize:11,color:BRAND.textMuted}}>Submission #{oi+1}</div></div>
+                                        <VerdictBadge verdict={ov2v}/>
                                       </div>
                                       {or&&<div style={{display:'flex',gap:2,flexWrap:'wrap',marginBottom:6}}><ScorePill score={or.intent} label="Intent"/><ScorePill score={or.prompt} label="Prompt"/><ScorePill score={or.html} label="HTML"/>{or.ai_score>0&&<StarScore score={or.ai_score}/>}</div>}
                                       {or?.summary&&<div style={{fontSize:11,color:'#666',lineHeight:1.4,marginBottom:6}}>{or.summary}</div>}
-                                      {or?.action&&ov!=='qualified'&&<div style={{fontSize:11,color:'#92400e',background:'#fff8ee',borderRadius:6,padding:'6px 10px',marginBottom:6}}><strong>🔧</strong> {or.action}</div>}
+                                      {(ov2?.action||or?.action)&&ov2v!=='qualified'&&<div style={{fontSize:11,color:'#92400e',background:'#fff8ee',borderRadius:6,padding:'6px 10px',marginBottom:6}}><strong>🔧</strong> {ov2?.action||or?.action}</div>}
                                       <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                                         {ohtmlUp&&<a href={os.html_file} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📁 HTML</a>}
                                         {odeployed&&<a href={os.deployed} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#16a34a',textDecoration:'none',fontWeight:600}}>🚀 Live</a>}
-                                        {os.demo?.startsWith('http')&&<a href={os.demo} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📸 Demo</a>}
+                                        {os.demo?.startsWith('http')&&<a href={os.demo} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#7c3aed',textDecoration:'none',fontWeight:600}}>📹 Demo</a>}
                                       </div>
                                     </div>
                                   )
