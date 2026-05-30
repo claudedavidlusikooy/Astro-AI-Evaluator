@@ -12,6 +12,25 @@ const AUTH = { username:'Astro.People', password:'@People2026' }
 const STORAGE_KEY = 'astro_eval_data'
 const DEADLINE = new Date('2026-06-01T23:59:59')
 
+// ── Server sync (shared across all devices) ───────────────
+async function loadFromServer() {
+  try {
+    const resp = await fetch('/api/store', { cache: 'no-store' })
+    const data = await resp.json()
+    return data.data || null
+  } catch(e) { return null }
+}
+
+async function saveToServer(payload) {
+  try {
+    await fetch('/api/store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+  } catch(e) { console.error('Save to server failed:', e) }
+}
+
 const STAR_DATA = [
   {w:3,h:3,l:8,t:12,d:2.1,del:0.3},{w:2,h:2,l:23,t:67,d:3.2,del:0.8},
   {w:4,h:4,l:41,t:23,d:2.8,del:1.1},{w:2,h:2,l:57,t:78,d:3.5,del:0.2},
@@ -522,12 +541,11 @@ export default function Home(){
     try{const s=localStorage.getItem(STORAGE_KEY+'_ov');if(s)setManualOverrides(JSON.parse(s))}catch(e){}
   },[])
 
-  // Save results
+  // Save to localStorage (local fallback)
   useEffect(()=>{
     if(results.some(r=>r)){try{localStorage.setItem(STORAGE_KEY+'_res',JSON.stringify(results))}catch(e){}}
   },[results])
 
-  // Save subs/headers/fileName
   useEffect(()=>{
     if(subs.length>0){
       try{
@@ -537,6 +555,16 @@ export default function Home(){
       }catch(e){}
     }
   },[subs,originalHeaders,fileName])
+
+  // Sync to server (shared across all devices) whenever key data changes
+  useEffect(()=>{
+    if(subs.length>0&&results.some(r=>r)){
+      saveToServer({
+        subs, res:results, hdrs:originalHeaders,
+        fname:fileName, resubmitStatus, manualOverrides
+      })
+    }
+  },[results,resubmitStatus,manualOverrides])
 
   function setResubmit(idx,status){
     setResubmitStatus(prev=>{const next={...prev,[idx]:status};try{localStorage.setItem(STORAGE_KEY,JSON.stringify(next))}catch(e){};return next})
@@ -558,10 +586,24 @@ export default function Home(){
     })
   }
 
-  function doLogin(e){
+  async function doLogin(e){
     e.preventDefault()
     if(loginUser.trim()===AUTH.username&&loginPass===AUTH.password){
       setLoginError('')
+      // Try server first (shared across devices), fallback to localStorage
+      try{
+        const serverData = await loadFromServer()
+        if(serverData?.subs?.length>0){
+          setSubs(serverData.subs)
+          setOriginalHeaders(serverData.hdrs||[])
+          setResults(serverData.res?.length===serverData.subs.length?serverData.res:new Array(serverData.subs.length).fill(null))
+          setFileName(serverData.fname||'')
+          if(serverData.resubmitStatus) setResubmitStatus(serverData.resubmitStatus)
+          if(serverData.manualOverrides) setManualOverrides(serverData.manualOverrides)
+          setScreen('main');return
+        }
+      }catch(e){}
+      // Fallback: localStorage
       try{
         const savedSubs=localStorage.getItem(STORAGE_KEY+'_subs')
         const savedRes=localStorage.getItem(STORAGE_KEY+'_res')
@@ -625,6 +667,19 @@ export default function Home(){
       if(data.error)throw new Error(data.error)
       const newRes=[...results];newRes[idx]=data.result;setResults(newRes)
     }catch(e){console.error(e)}
+  }
+
+  async function reEvalOne(idx){
+    if(!subs[idx])return
+    setResults(prev=>{const next=[...prev];next[idx]=null;return next})
+    try{
+      const resp=await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submission:subs[idx]})})
+      const data=await resp.json()
+      if(data.error)throw new Error(data.error)
+      setResults(prev=>{const next=[...prev];next[idx]=data.result;return next})
+    }catch(e){
+      setResults(prev=>{const next=[...prev];next[idx]={intent:'none',intent_reason:'Error',prompt:'none',prompt_reason:'Error',html:'none',html_reason:'Error',verdict:'not_qualified',summary:'Eval error: '+e.message,action:'Please resubmit — evaluation failed.',ai_score:0,ai_score_reason:'Error'};return next})
+    }
   }
 
   async function runEval(evalAll=false){
@@ -992,6 +1047,7 @@ export default function Home(){
                           {deployed&&<a href={s.deployed} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#16a34a',textDecoration:'none',fontWeight:600}}>🚀 Live App</a>}
                           {s.demo?.startsWith('http')&&<a href={s.demo} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#7c3aed',textDecoration:'none',fontWeight:600}}>📹 Demo</a>}
                           {r&&verdict!=='qualified'&&<a href={makeGmailLink(s,r,override?.action)} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{padding:'5px 12px',fontSize:11,fontWeight:700,borderRadius:8,border:`1px solid ${BRAND.blue}`,background:'#eff6ff',color:BRAND.blue,textDecoration:'none'}}>✉️ Draft Email to {getName(s.email).split(' ')[0]}</a>}
+                          <button onClick={e=>{e.stopPropagation();reEvalOne(i)}} style={{padding:'5px 12px',fontSize:11,fontWeight:600,borderRadius:8,cursor:'pointer',border:`1px solid ${BRAND.border}`,background:'white',color:BRAND.textMuted}}>↺ Re-evaluate</button>
                           {/* Allow manual override from non-manual rows too */}
                           {!isManual&&!override&&verdict==='not_qualified'&&(
                             <button onClick={e=>{e.stopPropagation();setManualOverride(i,'qualified','')}} style={{background:'none',border:'1px solid #16a34a',color:'#16a34a',borderRadius:8,padding:'4px 10px',fontSize:11,cursor:'pointer',fontWeight:600}}>✅ Override: Qualified</button>
