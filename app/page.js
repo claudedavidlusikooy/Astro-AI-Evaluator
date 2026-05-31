@@ -532,10 +532,8 @@ export default function Home(){
   const[activeTab,setActiveTab]=useState('submissions')
   const[insightData,setInsightData]=useState(null)
   const[modalIdx,setModalIdx]=useState(null)
-  const[page,setPage]=useState(0)
-  const[pageSize,setPageSize]=useState(50)
-  const[reEvaluated,setReEvaluated]=useState({})
-  const[selected,setSelected]=useState({})
+  const[reEvaluated,setReEvaluated]=useState({}) // {idx: true} — tracks which submissions were re-evaluated
+  const[selected,setSelected]=useState({}) // {idx: true} — checked for bulk re-evaluate
   const fileRef=useRef()
   const countdown=getDeadlineCountdown()
 
@@ -560,13 +558,14 @@ export default function Home(){
     }
   },[subs,originalHeaders,fileName])
 
-  // Sync to server — debounced 3s to avoid flood during batch eval
+  // Sync to server (shared across all devices) whenever key data changes
   useEffect(()=>{
-    if(!subs.length||!results.some(r=>r))return
-    const timer=setTimeout(()=>{
-      saveToServer({subs,res:results,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
-    },3000)
-    return()=>clearTimeout(timer)
+    if(subs.length>0&&results.some(r=>r)){
+      saveToServer({
+        subs, res:results, hdrs:originalHeaders,
+        fname:fileName, resubmitStatus, manualOverrides
+      })
+    }
   },[results,resubmitStatus,manualOverrides])
 
   function setResubmit(idx,status){
@@ -588,9 +587,6 @@ export default function Home(){
       return next
     })
   }
-
-  // Reset to page 1 when filter/search/pageSize changes
-  useEffect(()=>{setPage(0)},[filter,search,pageSize])
 
   async function doLogin(e){
     e.preventDefault()
@@ -664,7 +660,6 @@ export default function Home(){
     setResults(matchedResults);setExpanded({});setInsightData(null);setScreen('main')
   }
 
-  // Re-evaluate a single submission (for manual review marking)
   async function reEvalOne(idx){
     if(!subs[idx])return
     setResults(prev=>{const next=[...prev];next[idx]=null;return next})
@@ -674,22 +669,30 @@ export default function Home(){
       if(data.error)throw new Error(data.error)
       setResults(prev=>{const next=[...prev];next[idx]=data.result;return next})
       setReEvaluated(prev=>({...prev,[idx]:true}))
-      setSelected(prev=>{const next={...prev};delete next[idx];return next})
+      setSelected(prev=>{const next={...prev};delete next[idx];return next}) // uncheck after done
     }catch(e){
-      setResults(prev=>{const next=[...prev];if(!next[idx])next[idx]=null;return next})
+      // On error, restore previous result if existed — don't overwrite valid data with error
+      setResults(prev=>{
+        const next=[...prev]
+        // Only set error if there was no previous valid result
+        if(!next[idx]||next[idx]?.summary?.startsWith('Eval error')){
+          next[idx]={intent:'none',intent_reason:'Evaluation failed',prompt:'none',prompt_reason:'Evaluation failed',html:'none',html_reason:'Evaluation failed',verdict:'not_qualified',summary:'Eval error: '+e.message,action:'Click ↺ Re-evaluate to try again.',ai_score:0,ai_score_reason:'Error'}
+        }
+        return next
+      })
     }
   }
 
   async function reEvalSelected(){
     const idxs=Object.keys(selected).map(Number).filter(i=>selected[i])
-    if(!idxs.length)return
-    for(const idx of idxs){await reEvalOne(idx)}
+    if(idxs.length===0)return
+    for(const idx of idxs){ await reEvalOne(idx) }
   }
 
   async function runEval(evalAll=false){
     if(running)return
     setRunning(true)
-    if(evalAll)setReEvaluated({})
+    if(evalAll) setReEvaluated({}) // clear re-eval badges when evaluating all
     const newRes=evalAll?new Array(subs.length).fill(null):[...results]
     const toEval=subs.map((s,i)=>({s,i,needsEval:!newRes[i]})).filter(x=>x.needsEval)
     let done=newRes.filter(r=>r).length
@@ -705,8 +708,7 @@ export default function Home(){
         }catch(e){
           newRes[i]={intent:'none',intent_reason:'Error',prompt:'none',prompt_reason:'Error',html:'none',html_reason:'Error',verdict:'not_qualified',summary:'Eval error: '+e.message,action:'Please resubmit — evaluation failed.',ai_score:0,ai_score_reason:'Error'}
         }
-        done++;setProgress({done,total:subs.length})
-        if(done%3===0||done===subs.length)setResults([...newRes])
+        done++;setProgress({done,total:subs.length});setResults([...newRes])
       }))
       if(batch+3<toEval.length)await sleep(300)
     }
@@ -760,8 +762,6 @@ export default function Home(){
 
   const uniqueCount=primaryIndexes.size
   const newCount=Array.from(primaryIndexes).filter(i=>!results[i]).length
-  const totalPages=Math.ceil(visible.length/pageSize)
-  const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
 
   const visible=useMemo(()=>subs.filter((s,i)=>{
     if(!primaryIndexes.has(i))return false
@@ -876,12 +876,6 @@ export default function Home(){
         ))}
         <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
           {running&&<div style={{display:'flex',alignItems:'center',gap:8}}><div style={{background:BRAND.border,borderRadius:10,height:6,width:140}}><div style={{background:`linear-gradient(90deg,${BRAND.lightBlue},${BRAND.blue})`,borderRadius:10,height:6,width:`${progress.total?Math.round(progress.done/progress.total*100):0}%`,transition:'width 0.3s'}}></div></div><span style={{fontSize:12,color:BRAND.textMuted,whiteSpace:'nowrap'}}>{progress.done}/{progress.total}</span></div>}
-          {!running&&Object.values(selected).some(v=>v)&&(
-            <button onClick={reEvalSelected}
-              style={{background:'#7c3aed',color:'white',border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'pointer',whiteSpace:'nowrap'}}>
-              ↺ Re-evaluate Selected ({Object.values(selected).filter(v=>v).length})
-            </button>
-          )}
           {!running&&<>
             <button onClick={()=>runEval(false)} disabled={newCount===0}
               style={{background:newCount===0?'#e2e8f0':`linear-gradient(135deg,${BRAND.navy},${BRAND.blue})`,color:newCount===0?BRAND.textMuted:'white',border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:newCount===0?'not-allowed':'pointer',whiteSpace:'nowrap'}}>
@@ -893,6 +887,12 @@ export default function Home(){
             </button>
           </>}
           {running&&<button disabled style={{background:'#e2e8f0',color:BRAND.textMuted,border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'not-allowed'}}>⏳ Evaluating…</button>}
+          {!running&&Object.values(selected).some(v=>v)&&(
+            <button onClick={reEvalSelected}
+              style={{background:'#7c3aed',color:'white',border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'pointer',whiteSpace:'nowrap'}}>
+              ↺ Re-evaluate Selected ({Object.values(selected).filter(v=>v).length})
+            </button>
+          )}
         </div>
       </div>
 
@@ -931,19 +931,17 @@ export default function Home(){
             <thead>
               <tr>
                 <th style={{padding:'10px 13px',background:BRAND.bgLight,borderBottom:`1px solid ${BRAND.border}`,width:32}}>
-                  <input type="checkbox"
-                    checked={visiblePage.length>0&&visiblePage.every(s=>selected[subs.indexOf(s)])}
-                    onChange={e=>{
-                      if(e.target.checked){const a={...selected};visiblePage.forEach(s=>{a[subs.indexOf(s)]=true});setSelected(a)}
-                      else{const a={...selected};visiblePage.forEach(s=>{delete a[subs.indexOf(s)]});setSelected(a)}
-                    }} style={{cursor:'pointer'}}/>
+                  <input type="checkbox" onChange={e=>{
+                    if(e.target.checked){const all={};visible.forEach(s=>{const i=subs.indexOf(s);all[i]=true});setSelected(all)}
+                    else setSelected({})
+                  }} checked={visible.length>0&&visible.every(s=>selected[subs.indexOf(s)])} style={{cursor:'pointer'}}/>
                 </th>
                 {['#','Submitter','Function','Purpose','Tool & Summary','Submission','Verdict','Scores','AI ★','Resubmit',''].map(h=><th key={h} style={{padding:'10px 13px',textAlign:'left',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,borderBottom:`1px solid ${BRAND.border}`,whiteSpace:'nowrap',background:BRAND.bgLight}}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
-              {visible.length===0&&<tr><td colSpan={11} style={{textAlign:'center',padding:40,color:BRAND.textMuted,fontSize:13}}>No submissions match this filter.</td></tr>}
-              {visiblePage.map(s=>{
+              {visible.length===0&&<tr><td colSpan={12} style={{textAlign:'center',padding:40,color:BRAND.textMuted,fontSize:13}}>No submissions match this filter.</td></tr>}
+              {visible.map(s=>{
                 const i=subs.indexOf(s);const r=results[i]
                 const override=manualOverrides[i]
                 const verdict=override?.verdict||calcVerdict(r)
@@ -961,7 +959,7 @@ export default function Home(){
                     <td style={{padding:'6px 13px'}} onClick={e=>e.stopPropagation()}>
                       <input type="checkbox" checked={!!selected[i]} onChange={e=>setSelected(prev=>({...prev,[i]:e.target.checked}))} style={{cursor:'pointer'}}/>
                     </td>
-                    <td style={{padding:'10px 13px',color:'#ccc',fontSize:12}}>{i+1}{reEvaluated[i]&&<span style={{display:'block',fontSize:9,color:'#7c3aed',fontWeight:700}}>↺ Re-eval'd</span>}</td>
+                    <td style={{padding:'10px 13px',color:'#ccc',fontSize:12}}>{i+1}{reEvaluated[i]&&<span style={{display:'block',fontSize:9,color:'#7c3aed',fontWeight:700,marginTop:2}}>↺ Re-eval'd</span>}</td>
                     <td style={{padding:'10px 13px'}}>
                       <div style={{fontWeight:600,color:BRAND.navy,maxWidth:110,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>
                       <div style={{color:BRAND.textMuted,fontSize:11,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.email}</div>
@@ -1001,7 +999,7 @@ export default function Home(){
                   </tr>,
                   isExp&&(
                     <tr key={`d${i}`}>
-                      <td colSpan={11} style={{background:BRAND.bgLight,padding:'16px 16px 20px',borderBottom:`1px solid ${BRAND.border}`,borderLeft:isManual?'4px solid #fb923c':'4px solid transparent'}}>
+                      <td colSpan={12} style={{background:BRAND.bgLight,padding:'16px 16px 20px',borderBottom:`1px solid ${BRAND.border}`,borderLeft:isManual?'4px solid #fb923c':'4px solid transparent'}}>
 
                         {/* Manual Review action panel — prominent */}
                         {isManual&&!override&&(
@@ -1125,38 +1123,6 @@ export default function Home(){
               })}
             </tbody>
           </table>
-
-        {/* Pagination controls */}
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0',flexWrap:'wrap',gap:8}}>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <span style={{fontSize:12,color:BRAND.textMuted}}>
-              {visible.length>0?`Showing ${page*pageSize+1}–${Math.min((page+1)*pageSize,visible.length)} of ${visible.length}`:''}
-            </span>
-            <div style={{display:'flex',alignItems:'center',gap:4}}>
-              <span style={{fontSize:11,color:BRAND.textMuted}}>Rows:</span>
-              {[10,25,50,100].map(n=>(
-                <button key={n} onClick={()=>setPageSize(n)}
-                  style={{border:`1.5px solid ${pageSize===n?BRAND.blue:BRAND.border}`,borderRadius:6,padding:'3px 9px',fontSize:11,cursor:'pointer',background:pageSize===n?BRAND.blue:'white',color:pageSize===n?'white':BRAND.textMuted,fontWeight:pageSize===n?700:400}}>
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
-          {totalPages>1&&(
-            <div style={{display:'flex',gap:4,alignItems:'center'}}>
-              <button onClick={()=>setPage(0)} disabled={page===0} style={{border:`1px solid ${BRAND.border}`,borderRadius:6,padding:'4px 9px',fontSize:11,cursor:page===0?'not-allowed':'pointer',background:page===0?'#f1f5f9':'white',color:page===0?BRAND.textMuted:BRAND.navy}}>«</button>
-              <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0} style={{border:`1px solid ${BRAND.border}`,borderRadius:6,padding:'4px 9px',fontSize:11,cursor:page===0?'not-allowed':'pointer',background:page===0?'#f1f5f9':'white',color:page===0?BRAND.textMuted:BRAND.navy}}>‹</button>
-              {[...Array(totalPages)].map((_,pi)=>{
-                if(totalPages<=7||pi===0||pi===totalPages-1||Math.abs(pi-page)<=1)
-                  return<button key={pi} onClick={()=>setPage(pi)} style={{border:`1.5px solid ${pi===page?BRAND.blue:BRAND.border}`,borderRadius:6,padding:'4px 9px',fontSize:11,cursor:'pointer',background:pi===page?BRAND.blue:'white',color:pi===page?'white':BRAND.navy,fontWeight:pi===page?700:400}}>{pi+1}</button>
-                if(Math.abs(pi-page)===2)return<span key={pi} style={{color:BRAND.textMuted,fontSize:12}}>…</span>
-                return null
-              })}
-              <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page===totalPages-1} style={{border:`1px solid ${BRAND.border}`,borderRadius:6,padding:'4px 9px',fontSize:11,cursor:page===totalPages-1?'not-allowed':'pointer',background:page===totalPages-1?'#f1f5f9':'white',color:page===totalPages-1?BRAND.textMuted:BRAND.navy}}>›</button>
-              <button onClick={()=>setPage(totalPages-1)} disabled={page===totalPages-1} style={{border:`1px solid ${BRAND.border}`,borderRadius:6,padding:'4px 9px',fontSize:11,cursor:page===totalPages-1?'not-allowed':'pointer',background:page===totalPages-1?'#f1f5f9':'white',color:page===totalPages-1?BRAND.textMuted:BRAND.navy}}>»</button>
-            </div>
-          )}
-        </div>
         </div>
       )}
     </div>
