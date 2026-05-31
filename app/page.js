@@ -12,6 +12,32 @@ const AUTH = { username:'Astro.People', password:'@People2026' }
 const STORAGE_KEY = 'astro_eval_data'
 const DEADLINE = new Date('2026-06-01T23:59:59')
 
+const VS = {
+  qualified:     {bg:'#dcfce7', color:'#15803d', label:'✅ Qualified', border:'#86efac'},
+  manual_review: {bg:'#fff7ed', color:'#c2410c', label:'⚠️ Manual Review', border:'#fb923c'},
+  not_qualified: {bg:'#fee2e2', color:'#991b1b', label:'🔄 Not Qualified', border:'#fca5a5'},
+  pending:       {bg:'#f1f5f9', color:'#64748b', label:'Pending', border:'#cbd5e1'},
+}
+
+const SS={full:{bg:'#dcfce7',color:'#166534',icon:'✓'},partial:{bg:'#fef3c7',color:'#854d0e',icon:'~'},none:{bg:'#fee2e2',color:'#991b1b',icon:'✗'}}
+
+const STAR_DATA = [
+  {w:3,h:3,l:8,t:12,d:2.1,del:0.3},{w:2,h:2,l:23,t:67,d:3.2,del:0.8},
+  {w:4,h:4,l:41,t:23,d:2.8,del:1.1},{w:2,h:2,l:57,t:78,d:3.5,del:0.2},
+  {w:3,h:3,l:71,t:34,d:2.4,del:1.5},{w:2,h:2,l:84,t:89,d:3.1,del:0.6},
+  {w:4,h:4,l:15,t:45,d:2.7,del:0.9},{w:3,h:3,l:33,t:91,d:3.3,del:1.3},
+  {w:2,h:2,l:62,t:15,d:2.9,del:0.4},{w:3,h:3,l:78,t:56,d:2.6,del:1.7},
+  {w:4,h:4,l:91,t:28,d:3.4,del:0.7},{w:2,h:2,l:48,t:72,d:2.2,del:1.0},
+  {w:3,h:3,l:5,t:84,d:3.0,del:0.5},{w:2,h:2,l:96,t:63,d:2.5,del:1.4},
+  {w:3,h:3,l:27,t:38,d:3.6,del:0.1},{w:4,h:4,l:68,t:8,d:2.3,del:1.6},
+]
+
+const PLANET_DATA = [
+  {size:60,l:8,t:15,hue:220,dur:18,del:0},{size:40,l:78,t:65,hue:260,dur:22,del:3},
+  {size:25,l:55,t:80,hue:200,dur:15,del:1},{size:45,l:88,t:20,hue:240,dur:25,del:5},
+  {size:20,l:15,t:70,hue:210,dur:12,del:2},
+]
+
 // ── Server sync (shared across all devices) ───────────────
 async function loadFromServer() {
   try {
@@ -31,21 +57,6 @@ async function saveToServer(payload) {
   } catch(e) { console.error('Save to server failed:', e) }
 }
 
-const STAR_DATA = [
-  {w:3,h:3,l:8,t:12,d:2.1,del:0.3},{w:2,h:2,l:23,t:67,d:3.2,del:0.8},
-  {w:4,h:4,l:41,t:23,d:2.8,del:1.1},{w:2,h:2,l:57,t:78,d:3.5,del:0.2},
-  {w:3,h:3,l:71,t:34,d:2.4,del:1.5},{w:2,h:2,l:84,t:89,d:3.1,del:0.6},
-  {w:4,h:4,l:15,t:45,d:2.7,del:0.9},{w:3,h:3,l:33,t:91,d:3.3,del:1.3},
-  {w:2,h:2,l:62,t:15,d:2.9,del:0.4},{w:3,h:3,l:78,t:56,d:2.6,del:1.7},
-  {w:4,h:4,l:91,t:28,d:3.4,del:0.7},{w:2,h:2,l:48,t:72,d:2.2,del:1.0},
-  {w:3,h:3,l:5,t:84,d:3.0,del:0.5},{w:2,h:2,l:96,t:63,d:2.5,del:1.4},
-  {w:3,h:3,l:27,t:38,d:3.6,del:0.1},{w:4,h:4,l:68,t:8,d:2.3,del:1.6},
-]
-const PLANET_DATA = [
-  {size:60,l:8,t:15,hue:220,dur:18,del:0},{size:40,l:78,t:65,hue:260,dur:22,del:3},
-  {size:25,l:55,t:80,hue:200,dur:15,del:1},{size:45,l:88,t:20,hue:240,dur:25,del:5},
-  {size:20,l:15,t:70,hue:210,dur:12,del:2},
-]
 
 // ── Verdict ────────────────────────────────────────────────
 function calcVerdict(r) {
@@ -58,12 +69,6 @@ function calcVerdict(r) {
   return (fulls>=2&&nones===0)?'qualified':'not_qualified'
 }
 
-const VS = {
-  qualified:     {bg:'#dcfce7', color:'#15803d', label:'✅ Qualified', border:'#86efac'},
-  manual_review: {bg:'#fff7ed', color:'#c2410c', label:'⚠️ Manual Review', border:'#fb923c'},
-  not_qualified: {bg:'#fee2e2', color:'#991b1b', label:'🔄 Not Qualified', border:'#fca5a5'},
-  pending:       {bg:'#f1f5f9', color:'#64748b', label:'Pending', border:'#cbd5e1'},
-}
 
 function VerdictBadge({verdict, large}){
   const v=VS[verdict]||VS.pending
@@ -166,7 +171,6 @@ function makeGmailLink(s,r,overrideAction){
 }
 
 // ── Score UI ───────────────────────────────────────────────
-const SS={full:{bg:'#dcfce7',color:'#166534',icon:'✓'},partial:{bg:'#fef3c7',color:'#854d0e',icon:'~'},none:{bg:'#fee2e2',color:'#991b1b',icon:'✗'}}
 function ScorePill({score,label}){const c=SS[score]||SS.none;return<span style={{display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:700,margin:1,background:c.bg,color:c.color}}>{c.icon} {label}</span>}
 function ScoreLabel({score}){const c=SS[score]||SS.none;const L={full:'Fully Demonstrated',partial:'Partially Demonstrated',none:'Not Demonstrated'};return<span style={{display:'inline-block',padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:600,background:c.bg,color:c.color}}>{L[score]||'—'}</span>}
 function StarScore({score}){const n=parseInt(score)||0;return<div style={{display:'flex',alignItems:'center',gap:2}}>{[1,2,3,4,5].map(i=><span key={i} style={{fontSize:13,color:i<=n?'#f59e0b':'#e2e8f0'}}>★</span>)}<span style={{fontSize:11,color:BRAND.textMuted,marginLeft:2}}>{n}/5</span></div>}
