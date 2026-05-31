@@ -764,8 +764,6 @@ export default function Home(){
   const newCount=Array.from(primaryIndexes).filter(i=>!results[i]).length
   const totalPages=Math.ceil(visible.length/pageSize)
   const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
-  const totalPages=Math.ceil(visible.length/pageSize)
-  const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
 
   const visible=useMemo(()=>subs.filter((s,i)=>{
     if(!primaryIndexes.has(i))return false
