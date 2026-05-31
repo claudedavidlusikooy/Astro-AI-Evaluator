@@ -39,7 +39,7 @@ const PLANET_DATA = [
 ]
 
 // ── Server sync (shared across all devices) ───────────────
-async function loadFromServer() {
+const loadFromServer = async () => {
   try {
     const resp = await fetch('/api/store', { cache: 'no-store' })
     const data = await resp.json()
@@ -47,7 +47,7 @@ async function loadFromServer() {
   } catch(e) { return null }
 }
 
-async function saveToServer(payload) {
+const saveToServer = async (payload) => {
   try {
     await fetch('/api/store', {
       method: 'POST',
@@ -59,7 +59,7 @@ async function saveToServer(payload) {
 
 
 // ── Verdict ────────────────────────────────────────────────
-function calcVerdict(r) {
+const calcVerdict = (r) => {
   if (!r) return 'pending'
   // Use AI-determined verdict if available
   if (r.verdict) return r.verdict
@@ -70,7 +70,7 @@ function calcVerdict(r) {
 }
 
 
-function VerdictBadge({verdict, large}){
+const VerdictBadge = ({verdict, large}) => {
   const v=VS[verdict]||VS.pending
   const isManual = verdict==='manual_review'
   return(
@@ -84,17 +84,17 @@ function VerdictBadge({verdict, large}){
   )
 }
 
-function looksLikeLinkOnly(val){if(!val)return false;const t=val.trim();return t.startsWith('http')&&!t.includes(' ')&&t.length<400}
+const looksLikeLinkOnly = (val) => {if(!val)return false;const t=val.trim();return t.startsWith('http')&&!t.includes(' ')&&t.length<400}
 
 // ── File helpers ───────────────────────────────────────────
-async function loadXLSX(){return await import('xlsx')}
-async function parseXLSXFile(file){
+const loadXLSX = async () => {return await import('xlsx')}
+const parseXLSXFile = async (file) => {
   const XLSX=await loadXLSX();const buf=await file.arrayBuffer()
   const wb=XLSX.read(buf,{type:'array'});const ws=wb.Sheets[wb.SheetNames[0]]
   const rows=XLSX.utils.sheet_to_json(ws,{defval:''})
   return{rows,headers:rows.length?Object.keys(rows[0]):[]}
 }
-function parseCSVText(txt){
+const parseCSVText = (txt) => {
   const rows=[];let line=[],field='',inQ=false
   for(let i=0;i<=txt.length;i++){
     const ch=txt[i]
@@ -107,11 +107,11 @@ function parseCSVText(txt){
   const hdrs=rows[0].map(h=>h.trim())
   return rows.slice(1).map(r=>{const o={};hdrs.forEach((h,i)=>o[h]=(r[i]||'').trim());return o})
 }
-function pick(row,...keys){
+const pick = (row,...keys) => {
   for(const k of keys){const found=Object.keys(row).find(h=>h.toLowerCase().includes(k.toLowerCase()));if(found!==undefined&&row[found]!==undefined&&String(row[found]).trim()!=='')return String(row[found]).trim()}
   return''
 }
-function mapRow(row){
+const mapRow = (row) => {
   return{
     _raw:row,email:pick(row,'email'),dept:pick(row,'function','team','dept','divisi'),
     purpose:pick(row,'purpose','tujuan'),
@@ -125,12 +125,12 @@ function mapRow(row){
     timestamp:pick(row,'timestamp','time'),
   }
 }
-function hasHtmlFile(s){const h=s.html_file||'';return h.length>4&&(h.includes('drive.google')||(h.startsWith('http')&&!h.includes('chatgpt')&&!h.includes('claude.ai')))}
+const hasHtmlFile = (s) => {const h=s.html_file||'';return h.length>4&&(h.includes('drive.google')||(h.startsWith('http')&&!h.includes('chatgpt')&&!h.includes('claude.ai')))}
 function hasDeployedLink(s){const d=s.deployed||'';return d.length>3&&d!=='-'&&d.startsWith('http')&&!d.startsWith('file://')&&!['chatgpt.com','suno.com','play.google','claude.ai','localhost'].some(x=>d.includes(x))}
-function getName(email){return(email||'').split('@')[0].split('.').map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join(' ')}
-function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
-function makeFingerprint(s){return[s.email,s.tool_name,s.problem,s.prompt,s.html_file,s.deployed].join('|||')}
-function getDeadlineCountdown(){
+const getName = (email) => {return(email||'').split('@')[0].split('.').map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join(' ')}
+const sleep = (ms) => {return new Promise(r=>setTimeout(r,ms))}
+const makeFingerprint = (s) => {return[s.email,s.tool_name,s.problem,s.prompt,s.html_file,s.deployed].join('|||')}
+const getDeadlineCountdown = () => {
   const now=new Date();const diff=DEADLINE-now
   if(diff<=0)return{text:'Deadline passed',urgent:true}
   const days=Math.floor(diff/(1000*60*60*24));const hours=Math.floor((diff%(1000*60*60*24))/(1000*60*60))
@@ -138,7 +138,7 @@ function getDeadlineCountdown(){
   return{text:`${hours}h until deadline`,urgent:true}
 }
 
-async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus,manualOverrides){
+const exportToXLSX = async (subs,results,originalRows,originalHeaders,resubmitStatus,manualOverrides) => {
   const XLSX=await loadXLSX()
   const newCols=['Verdict','Manual Override','Resubmit Status','Intent Score','Prompt Score','HTML Score','AI Score','HTML Uploaded','Flags','Summary','Action Required']
   const headers=[...originalHeaders,...newCols]
@@ -163,7 +163,7 @@ async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitSt
   XLSX.writeFile(wb,'astro_ai_challenge_results.xlsx')
 }
 
-function makeGmailLink(s,r,overrideAction){
+const makeGmailLink = (s,r,overrideAction) => {
   const name=getName(s.email);const action=overrideAction||r?.action||''
   const subject=`Astro Personal AI Challenge — Your Submission Needs Resubmission`
   const body=`Hi ${name},\n\nThank you for participating in Astro's Personal AI Challenge! 🚀\n\nWe've reviewed your submission "${s.tool_name}" and it requires resubmission.\n\n📋 FEEDBACK\n${r?.summary||''}\n\n🔧 ACTION REQUIRED\n${action}\n\n📊 SCORES\n• Clear Intent: ${r?.intent||'-'} — ${r?.intent_reason||''}\n• Prompt: ${r?.prompt||'-'} — ${r?.prompt_reason||''}\n• HTML/App: ${r?.html||'-'} — ${r?.html_reason||''}\n• AI Score: ${r?.ai_score||'-'}/5\n\n📅 DEADLINE: 1 June 2026\nResubmit: https://bit.ly/AstroPersonalAI\n\nBest,\nPeople Team · Astro`
@@ -176,7 +176,7 @@ function ScoreLabel({score}){const c=SS[score]||SS.none;const L={full:'Fully Dem
 function StarScore({score}){const n=parseInt(score)||0;return<div style={{display:'flex',alignItems:'center',gap:2}}>{[1,2,3,4,5].map(i=><span key={i} style={{fontSize:13,color:i<=n?'#f59e0b':'#e2e8f0'}}>★</span>)}<span style={{fontSize:11,color:BRAND.textMuted,marginLeft:2}}>{n}/5</span></div>}
 
 // ── Fluid Sphere Loader ────────────────────────────────────
-function SphereLoader({current,total,label}){
+const SphereLoader = ({current,total,label}) => {
   const pct=total?Math.round(current/total*100):0
   return(
     <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'44px 0 32px',gap:22}}>
@@ -222,7 +222,7 @@ function SphereLoader({current,total,label}){
 }
 
 // ── Rocket Transition ──────────────────────────────────────
-function RocketTransition({onDone}){
+const RocketTransition = ({onDone}) => {
   useEffect(()=>{const t=setTimeout(onDone,3000);return()=>clearTimeout(t)},[onDone])
   return(
     <div style={{position:'fixed',inset:0,background:`linear-gradient(135deg,${BRAND.navy} 0%,${BRAND.blue} 60%,${BRAND.lightBlue} 100%)`,zIndex:9999,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
@@ -241,7 +241,7 @@ function RocketTransition({onDone}){
 }
 
 // ── Legend ─────────────────────────────────────────────────
-function LegendCard(){
+const LegendCard = () => {
   const[open,setOpen]=useState(false)
   return(
     <div style={{marginBottom:10}}>
@@ -288,7 +288,7 @@ function LegendCard(){
 }
 
 // ── Submission Modal ───────────────────────────────────────
-function SubmissionModal({s,r,idx,onClose,override}){
+const SubmissionModal = ({s,r,idx,onClose,override}) => {
   if(!s)return null
   const verdict=override?.verdict||calcVerdict(r)
   const htmlUp=hasHtmlFile(s);const deployed=hasDeployedLink(s)
@@ -340,7 +340,7 @@ function SubmissionModal({s,r,idx,onClose,override}){
 }
 
 // ── Top Submissions ────────────────────────────────────────
-function TopSubmissions({subs,results,manualOverrides,onSelect}){
+const TopSubmissions = ({subs,results,manualOverrides,onSelect}) => {
   const top=subs.map((s,i)=>({s,r:results[i],i,ov:manualOverrides[i]}))
     .filter(({r,ov})=>r&&r.ai_score>=4&&(ov?.verdict||calcVerdict(r))==='qualified')
     .sort((a,b)=>b.r.ai_score-a.r.ai_score).slice(0,6)
@@ -375,7 +375,7 @@ function TopSubmissions({subs,results,manualOverrides,onSelect}){
 }
 
 // ── PDF Export ─────────────────────────────────────────────
-function exportInsightsPDF(insightData,counts,uniqueCount,subs){
+const exportInsightsPDF = (insightData,counts,uniqueCount,subs) => {
   const MC={'Beginner':'#dc2626','Developing':'#d97706','Intermediate':'#2563eb','Advanced':'#16a34a'}
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Astro AI Challenge — Insights Report</title>
 <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:40px;color:#1B2B6B}.header{background:linear-gradient(135deg,#1B2B6B,#2B5CE6);color:white;padding:32px 40px;border-radius:12px;margin-bottom:28px}.header h1{font-size:26px;font-weight:900;margin:0 0 6px}.header p{font-size:13px;opacity:0.7;margin:0}.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:28px}.stat{background:#F0F5FF;border-radius:10px;padding:12px 14px;text-align:center}.stat .n{font-size:24px;font-weight:800}.stat .l{font-size:10px;color:#6B7BAD;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}.section{margin-bottom:28px}.section h2{font-size:16px;font-weight:800;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #D0DCF5}.maturity{display:inline-block;padding:6px 16px;border-radius:10px;font-size:13px;font-weight:700;margin-bottom:14px}.summary{font-size:13px;line-height:1.7;color:#444;margin-bottom:18px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}.card{border-radius:10px;padding:14px 16px}.card h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px}.card li{font-size:12px;line-height:1.5;margin-bottom:5px;list-style:none;padding-left:12px;position:relative}.card li:before{content:'•';position:absolute;left:0}.fn-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.fn-card{border:1px solid #D0DCF5;border-radius:10px;padding:16px}.fn-card h3{font-size:14px;font-weight:800;margin:0 0 4px}.fn-meta{font-size:11px;color:#6B7BAD;margin-bottom:8px}.stars{color:#f59e0b;font-size:14px;margin-bottom:6px}.bar-bg{background:#e2e8f0;border-radius:4px;height:4px;margin-bottom:10px}.bar-fg{background:linear-gradient(90deg,#16a34a,#22c55e);border-radius:4px;height:4px}.fn-sum{font-size:12px;color:#555;line-height:1.5;margin-bottom:10px}.fn-2col{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fn-box{border-radius:7px;padding:8px 10px}.fn-box h4{font-size:10px;font-weight:700;text-transform:uppercase;margin:0 0 5px}.fn-box li{font-size:11px;line-height:1.4;margin-bottom:3px;list-style:none;padding-left:10px;position:relative}.fn-box li:before{content:'•';position:absolute;left:0}.footer{margin-top:40px;padding-top:16px;border-top:1px solid #D0DCF5;font-size:11px;color:#6B7BAD;text-align:center}@media print{button{display:none}}</style></head><body>
@@ -404,7 +404,7 @@ ${(insightData.functions||[]).map(fn=>{const q=fn.submission_count?Math.round(fn
 }
 
 // ── Insights Tab ───────────────────────────────────────────
-function InsightsTab({subs,results,insightData,setInsightData,counts,uniqueCount,manualOverrides}){
+const InsightsTab = ({subs,results,insightData,setInsightData,counts,uniqueCount,manualOverrides}) => {
   const[loading,setLoading]=useState(false)
   const[error,setError]=useState('')
   const evaluatedCount=results.filter(r=>r).length
