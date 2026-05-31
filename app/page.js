@@ -762,8 +762,6 @@ export default function Home(){
 
   const uniqueCount=primaryIndexes.size
   const newCount=Array.from(primaryIndexes).filter(i=>!results[i]).length
-  const totalPages=Math.ceil(visible.length/pageSize)
-  const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
 
   const visible=useMemo(()=>subs.filter((s,i)=>{
     if(!primaryIndexes.has(i))return false
@@ -1050,6 +1048,9 @@ export default function Home(){
                         {/* Scores */}
                         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:10,marginBottom:10}}>
                           {[['Clear Intent','intent','intent_reason'],['Multi-Conv. Prompt','prompt','prompt_reason'],['Working HTML/App','html','html_reason']].map(([lbl,sk,rk])=>(
+
+  const totalPages=Math.ceil(visible.length/pageSize)
+  const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
                             <div key={sk} style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px'}}>
                               <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,marginBottom:7,fontWeight:700}}>{lbl}</div>
                               {r?<ScoreLabel score={r[sk]}/>:<span style={{fontSize:12,color:'#ccc'}}>Not evaluated</span>}
