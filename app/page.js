@@ -532,8 +532,10 @@ export default function Home(){
   const[activeTab,setActiveTab]=useState('submissions')
   const[insightData,setInsightData]=useState(null)
   const[modalIdx,setModalIdx]=useState(null)
-  const[reEvaluated,setReEvaluated]=useState({}) // {idx: true} — tracks which submissions were re-evaluated
+  const[reEvaluated,setReEvaluated]=useState({})
+  const[page,setPage]=useState(0) // {idx: true} — tracks which submissions were re-evaluated
   const[selected,setSelected]=useState({}) // {idx: true} — checked for bulk re-evaluate
+  const[pageSize,setPageSize]=useState(50)
   const fileRef=useRef()
   const countdown=getDeadlineCountdown()
 
@@ -558,14 +560,13 @@ export default function Home(){
     }
   },[subs,originalHeaders,fileName])
 
-  // Sync to server (shared across all devices) whenever key data changes
+  // Sync to server — debounced, only fires 3s after last change, not during batch eval
   useEffect(()=>{
-    if(subs.length>0&&results.some(r=>r)){
-      saveToServer({
-        subs, res:results, hdrs:originalHeaders,
-        fname:fileName, resubmitStatus, manualOverrides
-      })
-    }
+    if(!subs.length||!results.some(r=>r))return
+    const timer=setTimeout(()=>{
+      saveToServer({subs,res:results,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+    },3000) // 3s debounce — avoids 300 writes during batch eval
+    return()=>clearTimeout(timer)
   },[results,resubmitStatus,manualOverrides])
 
   function setResubmit(idx,status){
@@ -624,6 +625,9 @@ export default function Home(){
       setShowRocket(true)
     }else setLoginError('Incorrect username or password.')
   }
+
+  // Reset page when filter/search/pageSize changes
+  useEffect(()=>{setPage(0)},[filter,search,pageSize])
 
   function doLogout(){
     // Only clear auth state — keep data so next login restores dashboard
@@ -708,7 +712,8 @@ export default function Home(){
         }catch(e){
           newRes[i]={intent:'none',intent_reason:'Error',prompt:'none',prompt_reason:'Error',html:'none',html_reason:'Error',verdict:'not_qualified',summary:'Eval error: '+e.message,action:'Please resubmit — evaluation failed.',ai_score:0,ai_score_reason:'Error'}
         }
-        done++;setProgress({done,total:subs.length});setResults([...newRes])
+        done++;setProgress({done,total:subs.length})
+        if(done%3===0||done===subs.length)setResults([...newRes]) // batch UI updates
       }))
       if(batch+3<toEval.length)await sleep(300)
     }
@@ -732,25 +737,27 @@ export default function Home(){
   }
 
   // ── Deduplication ──────────────────────────────────────────
+  // Dedup structure — only recompute when subs or results change (not on every override)
   const dedupedData=useMemo(()=>{
     const byEmail={}
     subs.forEach((s,i)=>{const email=s.email.toLowerCase();if(!byEmail[email])byEmail[email]=[];byEmail[email].push({s,i,r:results[i]})})
     const primaryIndexes=new Set();const othersByPrimary={};const isResubmission=new Set()
     Object.values(byEmail).forEach(group=>{
       if(group.length===1){primaryIndexes.add(group[0].i);return}
+      // Sort by verdict quality then recency — without manualOverrides to avoid dep
       const sorted=[...group].sort((a,b)=>{
-        const av=manualOverrides[a.i]?.verdict||calcVerdict(a.r);const bv=manualOverrides[b.i]?.verdict||calcVerdict(b.r)
+        const av=calcVerdict(a.r);const bv=calcVerdict(b.r)
         if(av==='qualified'&&bv!=='qualified')return -1
         if(bv==='qualified'&&av!=='qualified')return 1
         return b.i-a.i
       })
       const primary=sorted[0];primaryIndexes.add(primary.i)
       const others=sorted.slice(1);othersByPrimary[primary.i]=others
-      const olderNotQual=others.some(x=>{const v=manualOverrides[x.i]?.verdict||calcVerdict(x.r);return v==='not_qualified'||v==='manual_review'})
+      const olderNotQual=others.some(x=>{const v=calcVerdict(x.r);return v==='not_qualified'||v==='manual_review'})
       if(olderNotQual&&primary.i>Math.min(...others.map(x=>x.i)))isResubmission.add(primary.i)
     })
-    return{primaryIndexes,othersByPrimary,isResubmission,byEmail}
-  },[subs,results,manualOverrides])
+    return{primaryIndexes,othersByPrimary,isResubmission}
+  },[subs,results])
 
   const{primaryIndexes,othersByPrimary,isResubmission}=dedupedData
 
@@ -762,14 +769,16 @@ export default function Home(){
 
   const uniqueCount=primaryIndexes.size
   const newCount=Array.from(primaryIndexes).filter(i=>!results[i]).length
+  const totalPages=Math.ceil(visible.length/pageSize)
+  const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
 
   const visible=useMemo(()=>subs.filter((s,i)=>{
     if(!primaryIndexes.has(i))return false
     const v=manualOverrides[i]?.verdict||calcVerdict(results[i])
     if(filter!=='all'&&v!==filter)return false
-    if(search)return(getName(s.email)+s.email+s.dept+s.tool_name).toLowerCase().includes(search.toLowerCase())
+    if(search){const q=search.toLowerCase();return(getName(s.email)+s.email+s.dept+s.tool_name).toLowerCase().includes(q)}
     return true
-  }),[subs,results,filter,search,primaryIndexes,manualOverrides])
+  }),[subs,results,filter,search,uniqueCount,manualOverrides])
 
   // ── Login ─────────────────────────────────────────────────
   if(showRocket)return<RocketTransition onDone={()=>{setShowRocket(false);setScreen('upload')}}/>
@@ -932,16 +941,16 @@ export default function Home(){
               <tr>
                 <th style={{padding:'10px 13px',background:BRAND.bgLight,borderBottom:`1px solid ${BRAND.border}`,width:32}}>
                   <input type="checkbox" onChange={e=>{
-                    if(e.target.checked){const all={};visible.forEach(s=>{const i=subs.indexOf(s);all[i]=true});setSelected(all)}
-                    else setSelected({})
-                  }} checked={visible.length>0&&visible.every(s=>selected[subs.indexOf(s)])} style={{cursor:'pointer'}}/>
+                    if(e.target.checked){const all={...selected};visiblePage.forEach(s=>{const i=subs.indexOf(s);all[i]=true});setSelected(all)}
+                    else{const next={...selected};visiblePage.forEach(s=>{const i=subs.indexOf(s);delete next[i]});setSelected(next)}
+                  }} checked={visiblePage.length>0&&visiblePage.every(s=>selected[subs.indexOf(s)])} style={{cursor:'pointer'}}/>
                 </th>
                 {['#','Submitter','Function','Purpose','Tool & Summary','Submission','Verdict','Scores','AI ★','Resubmit',''].map(h=><th key={h} style={{padding:'10px 13px',textAlign:'left',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,borderBottom:`1px solid ${BRAND.border}`,whiteSpace:'nowrap',background:BRAND.bgLight}}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
               {visible.length===0&&<tr><td colSpan={12} style={{textAlign:'center',padding:40,color:BRAND.textMuted,fontSize:13}}>No submissions match this filter.</td></tr>}
-              {visible.map(s=>{
+              {visiblePage.map(s=>{
                 const i=subs.indexOf(s);const r=results[i]
                 const override=manualOverrides[i]
                 const verdict=override?.verdict||calcVerdict(r)
@@ -1123,6 +1132,38 @@ export default function Home(){
               })}
             </tbody>
           </table>
+
+        {/* Pagination */}
+        {(totalPages>1||true)&&(
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 0',flexWrap:'wrap',gap:8}}>
+            <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <div style={{fontSize:12,color:BRAND.textMuted}}>
+                {visible.length>0?`Showing ${page*pageSize+1}–${Math.min((page+1)*pageSize,visible.length)} of ${visible.length} unique submitters`:`0 submitters`}
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                <span style={{fontSize:11,color:BRAND.textMuted}}>Rows:</span>
+                {[10,25,50,100].map(n=>(
+                  <button key={n} onClick={()=>setPageSize(n)}
+                    style={{border:`1.5px solid ${pageSize===n?BRAND.blue:BRAND.border}`,borderRadius:7,padding:'4px 9px',fontSize:11,cursor:'pointer',background:pageSize===n?BRAND.blue:'white',color:pageSize===n?'white':BRAND.textMuted,fontWeight:pageSize===n?700:400,transition:'all 0.1s'}}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+              <button onClick={()=>setPage(0)} disabled={page===0} style={{border:`1px solid ${BRAND.border}`,borderRadius:7,padding:'5px 10px',fontSize:12,cursor:page===0?'not-allowed':'pointer',background:page===0?'#f1f5f9':'white',color:page===0?BRAND.textMuted:BRAND.navy}}>«</button>
+              <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0} style={{border:`1px solid ${BRAND.border}`,borderRadius:7,padding:'5px 10px',fontSize:12,cursor:page===0?'not-allowed':'pointer',background:page===0?'#f1f5f9':'white',color:page===0?BRAND.textMuted:BRAND.navy}}>‹ Prev</button>
+              {[...Array(totalPages)].map((_,pi)=>{
+                if(totalPages<=7||pi===0||pi===totalPages-1||Math.abs(pi-page)<=1)
+                  return<button key={pi} onClick={()=>setPage(pi)} style={{border:`1px solid ${pi===page?BRAND.blue:BRAND.border}`,borderRadius:7,padding:'5px 10px',fontSize:12,cursor:'pointer',background:pi===page?BRAND.blue:'white',color:pi===page?'white':BRAND.navy,fontWeight:pi===page?700:400}}>{pi+1}</button>
+                if(Math.abs(pi-page)===2)return<span key={pi} style={{color:BRAND.textMuted,fontSize:12,padding:'0 4px'}}>…</span>
+                return null
+              })}
+              <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page===totalPages-1} style={{border:`1px solid ${BRAND.border}`,borderRadius:7,padding:'5px 10px',fontSize:12,cursor:page===totalPages-1?'not-allowed':'pointer',background:page===totalPages-1?'#f1f5f9':'white',color:page===totalPages-1?BRAND.textMuted:BRAND.navy}}>Next ›</button>
+              <button onClick={()=>setPage(totalPages-1)} disabled={page===totalPages-1} style={{border:`1px solid ${BRAND.border}`,borderRadius:7,padding:'5px 10px',fontSize:12,cursor:page===totalPages-1?'not-allowed':'pointer',background:page===totalPages-1?'#f1f5f9':'white',color:page===totalPages-1?BRAND.textMuted:BRAND.navy}}>»</button>
+            </div>
+          </div>
+        )}
         </div>
       )}
     </div>
