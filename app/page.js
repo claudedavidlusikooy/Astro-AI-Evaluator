@@ -770,6 +770,8 @@ export default function Home(){
     if(search)return(getName(s.email)+s.email+s.dept+s.tool_name).toLowerCase().includes(search.toLowerCase())
     return true
   }),[subs,results,filter,search,primaryIndexes,manualOverrides])
+  const totalPages=Math.ceil(visible.length/pageSize)
+  const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
 
   // ── Login ─────────────────────────────────────────────────
   if(showRocket)return<RocketTransition onDone={()=>{setShowRocket(false);setScreen('upload')}}/>
@@ -1049,8 +1051,6 @@ export default function Home(){
                         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:10,marginBottom:10}}>
                           {[['Clear Intent','intent','intent_reason'],['Multi-Conv. Prompt','prompt','prompt_reason'],['Working HTML/App','html','html_reason']].map(([lbl,sk,rk])=>(
 
-  const totalPages=Math.ceil(visible.length/pageSize)
-  const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
                             <div key={sk} style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:10,padding:'12px 14px'}}>
                               <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,marginBottom:7,fontWeight:700}}>{lbl}</div>
                               {r?<ScoreLabel score={r[sk]}/>:<span style={{fontSize:12,color:'#ccc'}}>Not evaluated</span>}
