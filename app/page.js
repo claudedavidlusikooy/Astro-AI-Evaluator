@@ -532,6 +532,8 @@ export default function Home(){
   const[activeTab,setActiveTab]=useState('submissions')
   const[insightData,setInsightData]=useState(null)
   const[modalIdx,setModalIdx]=useState(null)
+  const[reEvaluated,setReEvaluated]=useState({}) // {idx: true} — tracks which submissions were re-evaluated
+  const[selected,setSelected]=useState({}) // {idx: true} — checked for bulk re-evaluate
   const fileRef=useRef()
   const countdown=getDeadlineCountdown()
 
@@ -658,17 +660,6 @@ export default function Home(){
     setResults(matchedResults);setExpanded({});setInsightData(null);setScreen('main')
   }
 
-  // Re-evaluate a single submission (for manual review marking)
-  async function reEvalOne(idx,context){
-    const s=subs[idx];if(!s)return
-    try{
-      const resp=await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submission:s,manualContext:context})})
-      const data=await resp.json()
-      if(data.error)throw new Error(data.error)
-      const newRes=[...results];newRes[idx]=data.result;setResults(newRes)
-    }catch(e){console.error(e)}
-  }
-
   async function reEvalOne(idx){
     if(!subs[idx])return
     setResults(prev=>{const next=[...prev];next[idx]=null;return next})
@@ -677,14 +668,31 @@ export default function Home(){
       const data=await resp.json()
       if(data.error)throw new Error(data.error)
       setResults(prev=>{const next=[...prev];next[idx]=data.result;return next})
+      setReEvaluated(prev=>({...prev,[idx]:true}))
+      setSelected(prev=>{const next={...prev};delete next[idx];return next}) // uncheck after done
     }catch(e){
-      setResults(prev=>{const next=[...prev];next[idx]={intent:'none',intent_reason:'Error',prompt:'none',prompt_reason:'Error',html:'none',html_reason:'Error',verdict:'not_qualified',summary:'Eval error: '+e.message,action:'Please resubmit — evaluation failed.',ai_score:0,ai_score_reason:'Error'};return next})
+      // On error, restore previous result if existed — don't overwrite valid data with error
+      setResults(prev=>{
+        const next=[...prev]
+        // Only set error if there was no previous valid result
+        if(!next[idx]||next[idx]?.summary?.startsWith('Eval error')){
+          next[idx]={intent:'none',intent_reason:'Evaluation failed',prompt:'none',prompt_reason:'Evaluation failed',html:'none',html_reason:'Evaluation failed',verdict:'not_qualified',summary:'Eval error: '+e.message,action:'Click ↺ Re-evaluate to try again.',ai_score:0,ai_score_reason:'Error'}
+        }
+        return next
+      })
     }
+  }
+
+  async function reEvalSelected(){
+    const idxs=Object.keys(selected).map(Number).filter(i=>selected[i])
+    if(idxs.length===0)return
+    for(const idx of idxs){ await reEvalOne(idx) }
   }
 
   async function runEval(evalAll=false){
     if(running)return
     setRunning(true)
+    if(evalAll) setReEvaluated({}) // clear re-eval badges when evaluating all
     const newRes=evalAll?new Array(subs.length).fill(null):[...results]
     const toEval=subs.map((s,i)=>({s,i,needsEval:!newRes[i]})).filter(x=>x.needsEval)
     let done=newRes.filter(r=>r).length
@@ -879,6 +887,12 @@ export default function Home(){
             </button>
           </>}
           {running&&<button disabled style={{background:'#e2e8f0',color:BRAND.textMuted,border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'not-allowed'}}>⏳ Evaluating…</button>}
+          {!running&&Object.values(selected).some(v=>v)&&(
+            <button onClick={reEvalSelected}
+              style={{background:'#7c3aed',color:'white',border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'pointer',whiteSpace:'nowrap'}}>
+              ↺ Re-evaluate Selected ({Object.values(selected).filter(v=>v).length})
+            </button>
+          )}
         </div>
       </div>
 
@@ -915,10 +929,18 @@ export default function Home(){
 
           <table style={{width:'100%',borderCollapse:'collapse',background:'white',borderRadius:12,overflow:'hidden',border:`1px solid ${BRAND.border}`,fontSize:13,boxShadow:'0 2px 8px rgba(27,43,107,0.07)'}}>
             <thead>
-              <tr>{['#','Submitter','Function','Purpose','Tool & Summary','Submission','Verdict','Scores','AI ★','Resubmit',''].map(h=><th key={h} style={{padding:'10px 13px',textAlign:'left',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,borderBottom:`1px solid ${BRAND.border}`,whiteSpace:'nowrap',background:BRAND.bgLight}}>{h}</th>)}</tr>
+              <tr>
+                <th style={{padding:'10px 13px',background:BRAND.bgLight,borderBottom:`1px solid ${BRAND.border}`,width:32}}>
+                  <input type="checkbox" onChange={e=>{
+                    if(e.target.checked){const all={};visible.forEach(s=>{const i=subs.indexOf(s);all[i]=true});setSelected(all)}
+                    else setSelected({})
+                  }} checked={visible.length>0&&visible.every(s=>selected[subs.indexOf(s)])} style={{cursor:'pointer'}}/>
+                </th>
+                {['#','Submitter','Function','Purpose','Tool & Summary','Submission','Verdict','Scores','AI ★','Resubmit',''].map(h=><th key={h} style={{padding:'10px 13px',textAlign:'left',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:0.5,color:BRAND.textMuted,borderBottom:`1px solid ${BRAND.border}`,whiteSpace:'nowrap',background:BRAND.bgLight}}>{h}</th>)}
+              </tr>
             </thead>
             <tbody>
-              {visible.length===0&&<tr><td colSpan={11} style={{textAlign:'center',padding:40,color:BRAND.textMuted,fontSize:13}}>No submissions match this filter.</td></tr>}
+              {visible.length===0&&<tr><td colSpan={12} style={{textAlign:'center',padding:40,color:BRAND.textMuted,fontSize:13}}>No submissions match this filter.</td></tr>}
               {visible.map(s=>{
                 const i=subs.indexOf(s);const r=results[i]
                 const override=manualOverrides[i]
@@ -934,7 +956,10 @@ export default function Home(){
 
                 return[
                   <tr key={`r${i}`} style={{cursor:'pointer',borderBottom:`1px solid ${BRAND.border}`,borderLeft:isManual?'4px solid #fb923c':'4px solid transparent'}} onClick={()=>setExpanded(p=>({...p,[i]:!p[i]}))}>
-                    <td style={{padding:'10px 13px',color:'#ccc',fontSize:12}}>{i+1}</td>
+                    <td style={{padding:'6px 13px'}} onClick={e=>e.stopPropagation()}>
+                      <input type="checkbox" checked={!!selected[i]} onChange={e=>setSelected(prev=>({...prev,[i]:e.target.checked}))} style={{cursor:'pointer'}}/>
+                    </td>
+                    <td style={{padding:'10px 13px',color:'#ccc',fontSize:12}}>{i+1}{reEvaluated[i]&&<span style={{display:'block',fontSize:9,color:'#7c3aed',fontWeight:700,marginTop:2}}>↺ Re-eval'd</span>}</td>
                     <td style={{padding:'10px 13px'}}>
                       <div style={{fontWeight:600,color:BRAND.navy,maxWidth:110,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div>
                       <div style={{color:BRAND.textMuted,fontSize:11,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.email}</div>
@@ -974,7 +999,7 @@ export default function Home(){
                   </tr>,
                   isExp&&(
                     <tr key={`d${i}`}>
-                      <td colSpan={11} style={{background:BRAND.bgLight,padding:'16px 16px 20px',borderBottom:`1px solid ${BRAND.border}`,borderLeft:isManual?'4px solid #fb923c':'4px solid transparent'}}>
+                      <td colSpan={12} style={{background:BRAND.bgLight,padding:'16px 16px 20px',borderBottom:`1px solid ${BRAND.border}`,borderLeft:isManual?'4px solid #fb923c':'4px solid transparent'}}>
 
                         {/* Manual Review action panel — prominent */}
                         {isManual&&!override&&(
