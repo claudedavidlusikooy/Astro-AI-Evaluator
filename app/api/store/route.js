@@ -10,7 +10,10 @@ export async function GET() {
       cache: 'no-store'
     })
     const data = await resp.json()
-    const result = data.result ? JSON.parse(data.result) : null
+    if (!data.result) return Response.json({ data: null })
+    // Handle both single and double encoded data
+    let result = JSON.parse(data.result)
+    if (typeof result === 'string') result = JSON.parse(result)
     return Response.json({ data: result })
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 })
