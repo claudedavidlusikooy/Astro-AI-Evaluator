@@ -539,6 +539,14 @@ export default function Home(){
   const fileRef=useRef()
   const countdown=getDeadlineCountdown()
 
+  // Restore auth session on page refresh
+  useEffect(()=>{
+    try{
+      const wasAuthed=localStorage.getItem(STORAGE_KEY+'_authed')
+      if(wasAuthed==='1') setScreen('main')
+    }catch(e){}
+  },[])
+
   // Load persisted data on mount
   useEffect(()=>{
     try{const s=localStorage.getItem(STORAGE_KEY);if(s)setResubmitStatus(JSON.parse(s))}catch(e){}
@@ -608,6 +616,7 @@ export default function Home(){
           setFileName(serverData.fname||'')
           if(serverData.resubmitStatus) setResubmitStatus(serverData.resubmitStatus)
           if(serverData.manualOverrides) setManualOverrides(serverData.manualOverrides)
+          localStorage.setItem(STORAGE_KEY+'_authed','1')
           setScreen('main');return
         }
       }catch(e){}
@@ -623,7 +632,7 @@ export default function Home(){
           if(parsedSubs.length>0){
             setSubs(parsedSubs);setOriginalHeaders(parsedHdrs)
             setResults(parsedRes.length===parsedSubs.length?parsedRes:new Array(parsedSubs.length).fill(null))
-            setFileName(savedFname||'');setScreen('main');return
+            setFileName(savedFname||'');localStorage.setItem(STORAGE_KEY+'_authed','1');setScreen('main');return
           }
         }
       }catch(e){}
@@ -633,6 +642,7 @@ export default function Home(){
 
   function doLogout(){
     // Only clear auth state — keep data so next login restores dashboard
+    try{localStorage.removeItem(STORAGE_KEY+'_authed')}catch(e){}
     setScreen('login');setLoginUser('');setLoginPass('')
     setExpanded({});setActiveTab('submissions');setModalIdx(null)
   }
@@ -663,7 +673,7 @@ export default function Home(){
     }catch(e){}
     const matchedResults=newMapped.map(s=>prevFingerMap[makeFingerprint(s)]||null)
     setSubs(newMapped);setOriginalRows(newRaw);setOriginalHeaders(headers)
-    setResults(matchedResults);setExpanded({});setInsightData(null);setScreen('main')
+    setResults(matchedResults);setExpanded({});setInsightData(null);localStorage.setItem(STORAGE_KEY+'_authed','1');setScreen('main')
   }
 
   // Re-evaluate a single submission (for manual review marking)
@@ -750,7 +760,7 @@ export default function Home(){
       if(olderNotQual&&primary.i>Math.min(...others.map(x=>x.i)))isResubmission.add(primary.i)
     })
     return{primaryIndexes,othersByPrimary,isResubmission,byEmail}
-  },[subs,results,manualOverrides])
+  },[subs,results])
 
   const{primaryIndexes,othersByPrimary,isResubmission}=dedupedData
 
