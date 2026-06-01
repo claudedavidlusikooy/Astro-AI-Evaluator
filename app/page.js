@@ -10,7 +10,7 @@ const BRAND = {
 }
 const AUTH = { username:'Astro.People', password:'@People2026' }
 const STORAGE_KEY = 'astro_eval_data'
-const DEADLINE = new Date('2026-06-01T23:59:59')
+const DEADLINE = new Date('2026-06-04T23:59:59')
 
 // ── Server sync (shared across all devices) ───────────────
 async function loadFromServer() {
@@ -161,7 +161,7 @@ async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitSt
 function makeGmailLink(s,r,overrideAction){
   const name=getName(s.email);const action=overrideAction||r?.action||''
   const subject=`Astro Personal AI Challenge — Your Submission Needs Resubmission`
-  const body=`Hi ${name},\n\nThank you for participating in Astro's Personal AI Challenge! 🚀\n\nWe've reviewed your submission "${s.tool_name}" and it requires resubmission.\n\n📋 FEEDBACK\n${r?.summary||''}\n\n🔧 ACTION REQUIRED\n${action}\n\n📊 SCORES\n• Clear Intent: ${r?.intent||'-'} — ${r?.intent_reason||''}\n• Prompt: ${r?.prompt||'-'} — ${r?.prompt_reason||''}\n• HTML/App: ${r?.html||'-'} — ${r?.html_reason||''}\n• AI Score: ${r?.ai_score||'-'}/5\n\n📅 DEADLINE: 1 June 2026\nResubmit: https://bit.ly/AstroPersonalAI\n\nBest,\nPeople Team · Astro`
+  const body=`Hi ${name},\n\nThank you for participating in Astro's Personal AI Challenge! 🚀\n\nWe've reviewed your submission "${s.tool_name}" and it requires resubmission.\n\n📋 FEEDBACK\n${r?.summary||''}\n\n🔧 ACTION REQUIRED\n${action}\n\n📊 SCORES\n• Clear Intent: ${r?.intent||'-'} — ${r?.intent_reason||''}\n• Prompt: ${r?.prompt||'-'} — ${r?.prompt_reason||''}\n• HTML/App: ${r?.html||'-'} — ${r?.html_reason||''}\n• AI Score: ${r?.ai_score||'-'}/5\n\n📅 DEADLINE: 4 June 2026\nResubmit: https://bit.ly/AstroPersonalAI\n\nBest,\nPeople Team · Astro`
   return`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(s.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 }
 
@@ -247,7 +247,7 @@ function LegendCard(){
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:14}}>
             <div>
               <div style={{fontSize:12,fontWeight:800,color:BRAND.navy,marginBottom:10}}>Verdict</div>
-              {[['✅ Qualified','#dcfce7','#15803d','2+ Fully Demonstrated AND zero Not Demonstrated.'],['⚠️ Manual Review','#fff7ed','#c2410c','Flagged for human verification — tool may work but needs review.'],['🔄 Not Qualified','#fee2e2','#991b1b','Missing critical components. Must resubmit by 1 June 2026.']].map(([lbl,bg,color,desc])=>(
+              {[['✅ Qualified','#dcfce7','#15803d','2+ Fully Demonstrated AND zero Not Demonstrated.'],['⚠️ Manual Review','#fff7ed','#c2410c','Flagged for human verification — tool may work but needs review.'],['🔄 Not Qualified','#fee2e2','#991b1b','Missing critical components. Must resubmit by 4 June 2026.']].map(([lbl,bg,color,desc])=>(
                 <div key={lbl} style={{display:'flex',alignItems:'flex-start',gap:10,marginBottom:8}}>
                   <span style={{background:bg,color,fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:10,whiteSpace:'nowrap',border:`1px solid ${color}44`}}>{lbl}</span>
                   <span style={{fontSize:12,color:'#555',lineHeight:1.4}}>{desc}</span>
@@ -337,34 +337,116 @@ function SubmissionModal({s,r,idx,onClose,override}){
 
 // ── Top Submissions ────────────────────────────────────────
 function TopSubmissions({subs,results,manualOverrides,onSelect}){
-  const top=subs.map((s,i)=>({s,r:results[i],i,ov:manualOverrides[i]}))
-    .filter(({r,ov})=>r&&r.ai_score>=4&&(ov?.verdict||calcVerdict(r))==='qualified')
-    .sort((a,b)=>b.r.ai_score-a.r.ai_score).slice(0,6)
-  if(top.length===0)return(
+  const[expandedFn,setExpandedFn]=useState({})
+
+  // Ranking formula
+  function rankScore(r,s){
+    if(!r)return 0
+    const fulls=[r.intent,r.prompt,r.html].filter(x=>x==='full').length
+    const hasOutput=s.html_file?.length>3||s.deployed?.length>3||(s.demo&&s.demo.includes('drive'))
+    const hasDeployed=s.deployed?.startsWith('http')&&!s.deployed.includes('localhost')
+    let score=0
+    if(fulls===3)score+=3
+    if(hasDeployed)score+=2
+    else if(hasOutput)score+=1
+    if(r.ai_score===5)score+=2
+    else if(r.ai_score===4)score+=1
+    if(r.prompt==='full')score+=1
+    return score
+  }
+
+  const qualified=subs.map((s,i)=>({s,r:results[i],i,ov:manualOverrides[i]}))
+    .filter(({r,ov})=>r&&(ov?.verdict||calcVerdict(r))==='qualified')
+    .map(x=>({...x,score:rankScore(x.r,x.s)}))
+    .sort((a,b)=>b.score-a.score||b.r.ai_score-a.r.ai_score)
+
+  // Company Wide — top 1 per function, no duplicate functions, max 10
+  const companyWide=[]
+  const usedFunctions=new Set()
+  for(const item of qualified){
+    const fn=item.s.dept||'Unknown'
+    if(!usedFunctions.has(fn)){
+      usedFunctions.add(fn)
+      companyWide.push(item)
+      if(companyWide.length>=10)break
+    }
+  }
+
+  // Function Highlights — top 3 per function
+  const byFunction={}
+  for(const item of qualified){
+    const fn=item.s.dept||'Unknown'
+    if(!byFunction[fn])byFunction[fn]=[]
+    if(byFunction[fn].length<3)byFunction[fn].push(item)
+  }
+  const functions=Object.keys(byFunction).sort()
+
+  const medals=['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟']
+
+  function SubmissionCard({s,r,i,ov,rank,showRank}){
+    return(
+      <div onClick={()=>onSelect(i)}
+        style={{background:BRAND.bgLight,borderRadius:12,padding:'14px 16px',border:`1px solid ${BRAND.border}`,cursor:'pointer',position:'relative',transition:'all 0.15s'}}
+        onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 6px 20px rgba(27,43,107,0.12)'}}
+        onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='none'}}>
+        {showRank&&rank<10&&<div style={{position:'absolute',top:10,right:12,fontSize:15}}>{medals[rank]}</div>}
+        {ov&&<div style={{position:'absolute',top:10,left:12,fontSize:9,background:'#dbeafe',color:'#1e40af',padding:'1px 5px',borderRadius:5,fontWeight:700}}>Override</div>}
+        <div style={{display:'flex',gap:1,marginBottom:5}}>{[1,2,3,4,5].map(j=><span key={j} style={{fontSize:11,color:j<=(r?.ai_score||0)?'#f59e0b':'#e2e8f0'}}>★</span>)}</div>
+        <div style={{fontWeight:700,color:BRAND.navy,fontSize:13,marginBottom:2,paddingRight:24}}>{s.tool_name}</div>
+        <div style={{fontSize:12,color:BRAND.blue,fontWeight:600,marginBottom:1}}>{getName(s.email)}</div>
+        <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:5}}>{s.dept}</div>
+        {r?.summary&&<div style={{fontSize:11,color:'#555',lineHeight:1.4}}>{r.summary.substring(0,80)}{r.summary.length>80?'…':''}</div>}
+        <div style={{marginTop:6,fontSize:10,color:BRAND.blue,fontWeight:600}}>View details →</div>
+      </div>
+    )
+  }
+
+  if(qualified.length===0)return(
     <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'48px',textAlign:'center',color:BRAND.textMuted}}>
       <div style={{fontSize:32,marginBottom:12}}>🏆</div>
-      <div style={{fontSize:14,fontWeight:600}}>No top submissions yet — evaluate first!</div>
+      <div style={{fontSize:14,fontWeight:600}}>No qualified submissions yet — evaluate first!</div>
     </div>
   )
+
   return(
-    <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'20px 24px',boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
-      <div style={{fontSize:15,fontWeight:800,color:BRAND.navy,marginBottom:4}}>🏆 Top Submissions</div>
-      <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:16}}>AI score 4★+ · Qualified · Click to view full details</div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
-        {top.map(({s,r,i,ov},rank)=>(
-          <div key={i} onClick={()=>onSelect(i)} style={{background:BRAND.bgLight,borderRadius:12,padding:'14px 16px',border:`1px solid ${BRAND.border}`,cursor:'pointer',transition:'all 0.15s',position:'relative'}}
-            onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 6px 20px rgba(27,43,107,0.12)'}}
-            onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='none'}}>
-            {rank<3&&<div style={{position:'absolute',top:10,right:12,fontSize:16}}>{['🥇','🥈','🥉'][rank]}</div>}
-            {ov&&<div style={{position:'absolute',top:10,left:12,fontSize:10,background:'#dbeafe',color:'#1e40af',padding:'1px 6px',borderRadius:6,fontWeight:700}}>✏️ Override</div>}
-            <div style={{display:'flex',gap:1,marginBottom:6}}>{[1,2,3,4,5].map(j=><span key={j} style={{fontSize:12,color:j<=r.ai_score?'#f59e0b':'#e2e8f0'}}>★</span>)}</div>
-            <div style={{fontWeight:700,color:BRAND.navy,fontSize:13,marginBottom:3}}>{s.tool_name}</div>
-            <div style={{fontSize:12,color:BRAND.blue,fontWeight:600,marginBottom:2}}>{getName(s.email)}</div>
-            <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:6}}>{s.dept}</div>
-            {r.summary&&<div style={{fontSize:11,color:'#666',lineHeight:1.4}}>{r.summary.substring(0,90)}{r.summary.length>90?'…':''}</div>}
-            <div style={{marginTop:8,fontSize:10,color:BRAND.blue,fontWeight:600}}>Click to view details →</div>
-          </div>
-        ))}
+    <div style={{display:'flex',flexDirection:'column',gap:24}}>
+
+      {/* Company Wide */}
+      <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'20px 24px',boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
+        <div style={{fontSize:15,fontWeight:800,color:BRAND.navy,marginBottom:2}}>🏆 Company Wide</div>
+        <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:16}}>Best submission per function · Ranked overall · {companyWide.length} featured</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:12}}>
+          {companyWide.map(({s,r,i,ov},rank)=>(
+            <SubmissionCard key={i} s={s} r={r} i={i} ov={ov} rank={rank} showRank={true}/>
+          ))}
+        </div>
+      </div>
+
+      {/* Function Highlights */}
+      <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'20px 24px',boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
+        <div style={{fontSize:15,fontWeight:800,color:BRAND.navy,marginBottom:2}}>⭐ Function Highlights</div>
+        <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:16}}>Top 3 per function · Click function to expand</div>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {functions.map(fn=>(
+            <div key={fn} style={{border:`1px solid ${BRAND.border}`,borderRadius:10,overflow:'hidden'}}>
+              <div onClick={()=>setExpandedFn(p=>({...p,[fn]:!p[fn]}))}
+                style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 16px',cursor:'pointer',background:expandedFn[fn]?BRAND.bgLight:'white',userSelect:'none'}}>
+                <div>
+                  <span style={{fontWeight:700,color:BRAND.navy,fontSize:13}}>{fn}</span>
+                  <span style={{marginLeft:8,fontSize:11,color:BRAND.textMuted}}>{byFunction[fn].length} featured</span>
+                </div>
+                <span style={{color:BRAND.textMuted,fontSize:12}}>{expandedFn[fn]?'▲':'▼'}</span>
+              </div>
+              {expandedFn[fn]&&(
+                <div style={{padding:'12px 16px',background:BRAND.bgLight,display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:10}}>
+                  {byFunction[fn].map(({s,r,i,ov},rank)=>(
+                    <SubmissionCard key={i} s={s} r={r} i={i} ov={ov} rank={rank} showRank={false}/>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -372,7 +454,7 @@ function TopSubmissions({subs,results,manualOverrides,onSelect}){
 
 // ── PDF Export ─────────────────────────────────────────────
 function exportInsightsPDF(insightData,counts,uniqueCount,subs){
-  const MC={'Beginner':'#dc2626','Developing':'#d97706','Intermediate':'#2563eb','Advanced':'#16a34a'}
+  const MC={'Beginner':'#dc2626','Emerging':'#dc2626','Developing':'#d97706','Intermediate':'#2563eb','Advancing':'#2563eb','Advanced':'#16a34a','Leading':'#16a34a'}
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Astro AI Challenge — Insights Report</title>
 <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:40px;color:#1B2B6B}.header{background:linear-gradient(135deg,#1B2B6B,#2B5CE6);color:white;padding:32px 40px;border-radius:12px;margin-bottom:28px}.header h1{font-size:26px;font-weight:900;margin:0 0 6px}.header p{font-size:13px;opacity:0.7;margin:0}.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:28px}.stat{background:#F0F5FF;border-radius:10px;padding:12px 14px;text-align:center}.stat .n{font-size:24px;font-weight:800}.stat .l{font-size:10px;color:#6B7BAD;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}.section{margin-bottom:28px}.section h2{font-size:16px;font-weight:800;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #D0DCF5}.maturity{display:inline-block;padding:6px 16px;border-radius:10px;font-size:13px;font-weight:700;margin-bottom:14px}.summary{font-size:13px;line-height:1.7;color:#444;margin-bottom:18px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}.card{border-radius:10px;padding:14px 16px}.card h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px}.card li{font-size:12px;line-height:1.5;margin-bottom:5px;list-style:none;padding-left:12px;position:relative}.card li:before{content:'•';position:absolute;left:0}.fn-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.fn-card{border:1px solid #D0DCF5;border-radius:10px;padding:16px}.fn-card h3{font-size:14px;font-weight:800;margin:0 0 4px}.fn-meta{font-size:11px;color:#6B7BAD;margin-bottom:8px}.stars{color:#f59e0b;font-size:14px;margin-bottom:6px}.bar-bg{background:#e2e8f0;border-radius:4px;height:4px;margin-bottom:10px}.bar-fg{background:linear-gradient(90deg,#16a34a,#22c55e);border-radius:4px;height:4px}.fn-sum{font-size:12px;color:#555;line-height:1.5;margin-bottom:10px}.fn-2col{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fn-box{border-radius:7px;padding:8px 10px}.fn-box h4{font-size:10px;font-weight:700;text-transform:uppercase;margin:0 0 5px}.fn-box li{font-size:11px;line-height:1.4;margin-bottom:3px;list-style:none;padding-left:10px;position:relative}.fn-box li:before{content:'•';position:absolute;left:0}.footer{margin-top:40px;padding-top:16px;border-top:1px solid #D0DCF5;font-size:11px;color:#6B7BAD;text-align:center}@media print{button{display:none}}</style></head><body>
 <div class="header"><h1>Astro Personal AI Challenge</h1><p>AI Adoption Insights Report · ${new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</p></div>
@@ -388,11 +470,11 @@ function exportInsightsPDF(insightData,counts,uniqueCount,subs){
 <div class="summary">${insightData.company_summary||''}</div>
 <div class="grid3">
 <div class="card" style="background:#dcfce7"><h3 style="color:#166534">💪 Strengths</h3>${(insightData.company_strengths||[]).map(s=>`<li>${s}</li>`).join('')}</div>
-<div class="card" style="background:#fef3c7"><h3 style="color:#854d0e">🔍 Gaps</h3>${(insightData.company_gaps||[]).map(s=>`<li>${s}</li>`).join('')}</div>
+<div class="card" style="background:#fef3c7"><h3 style="color:#854d0e">🌱 Growth Opportunities</h3>${(insightData.company_opportunities||insightData.company_gaps||[]).map(s=>`<li>${s}</li>`).join('')}</div>
 <div class="card" style="background:#dbeafe"><h3 style="color:#1e40af">🚀 Recommendations</h3>${(insightData.company_recommendations||[]).map(s=>`<li>${s}</li>`).join('')}</div>
 </div></div>
 <div class="section"><h2>📊 Breakdown by Function</h2><div class="fn-grid">
-${(insightData.functions||[]).map(fn=>{const q=fn.submission_count?Math.round(fn.qualified_count/fn.submission_count*100):0;const stars='★'.repeat(Math.round(fn.avg_ai_score||0))+'☆'.repeat(5-Math.round(fn.avg_ai_score||0));return`<div class="fn-card"><h3>${fn.name}</h3><div class="fn-meta">${fn.submission_count} submissions · ${fn.qualified_count} qualified (${q}%)</div><div class="stars">${stars} ${fn.avg_ai_score}/5</div><div class="bar-bg"><div class="bar-fg" style="width:${q}%"></div></div><div class="fn-sum">${fn.summary||''}</div><div class="fn-2col"><div class="fn-box" style="background:#f0fdf4"><h4 style="color:#15803d">Strengths</h4>${(fn.strengths||[]).map(s=>`<li>${s}</li>`).join('')}</div><div class="fn-box" style="background:#fefce8"><h4 style="color:#854d0e">Next Steps</h4>${(fn.recommendations||[]).map(s=>`<li>${s}</li>`).join('')}</div></div></div>`}).join('')}
+${(insightData.functions||[]).map(fn=>{const q=fn.submission_count?Math.round(fn.qualified_count/fn.submission_count*100):0;const stars='★'.repeat(Math.round(fn.avg_ai_score||0))+'☆'.repeat(5-Math.round(fn.avg_ai_score||0));return`<div class="fn-card"><h3>${fn.name}</h3><div class="fn-meta">${fn.submission_count} submissions · ${fn.qualified_count} qualified (${q}%)</div><div class="stars">${stars} ${fn.avg_ai_score}/5</div>${fn.tier?`<div class="tier-badge">${fn.tier}</div>`:''}<div class="bar-bg"><div class="bar-fg" style="width:${q}%"></div></div><div class="fn-sum">${fn.summary||''}</div><div class="fn-2col"><div class="fn-box" style="background:#f0fdf4"><h4 style="color:#15803d">Strengths</h4>${(fn.strengths||[]).map(s=>`<li>${s}</li>`).join('')}</div><div class="fn-box" style="background:#fefce8"><h4 style="color:#854d0e">Next Steps</h4>${(fn.growth_areas||fn.recommendations||[]).map(s=>`<li>${s}</li>`).join('')}</div></div></div>`}).join('')}
 </div></div>
 <div class="footer">Astro Technologies · Personal AI Challenge 2026 · Confidential — People Team use only</div>
 </body></html>`
@@ -424,7 +506,25 @@ function InsightsTab({subs,results,insightData,setInsightData,counts,uniqueCount
       const weak=items.filter(x=>x.verdict==='not_qualified').slice(0,2).map(x=>`${x.name}(${x.tool})`)
       return`${fn}(${items.length}subs,${items.filter(x=>x.verdict==='qualified').length}qual,avg${(items.reduce((a,b)=>a+(b.ai_score||0),0)/items.length).toFixed(1)}): strong=${strong.join(',')}, needsWork=${weak.join(',')}`
     }).join('\n')
-    const prompt=`AI L&D analyst for Astro's Personal AI Challenge. ${totalEval} evaluated. Qualified: ${qualifiedCount}/${totalEval} (${Math.round(qualifiedCount/totalEval*100)}%). Avg AI: ${avgAI}/5.\n\nFunction data:\n${fnExamples}\n\nReturn ONLY valid JSON, ALL text under 100 chars, arrays max 3 items:\n{"company_summary":"2 sentences","company_strengths":["s1","s2","s3"],"company_gaps":["g1","g2","g3"],"company_recommendations":["r1","r2","r3"],"overall_ai_maturity":"Beginner|Developing|Intermediate|Advanced","functions":[{"name":"fn","submission_count":0,"qualified_count":0,"avg_ai_score":0.0,"summary":"1-2 sentences","strengths":["s1","s2"],"recommendations":["r1","r2"],"example_strong":"name - tool","example_gap":"name - tool"}]}`
+    const prompt=`You are an AI adoption analyst for Astro Technologies Indonesia.
+
+Context: This is a cultural change initiative — NOT a competition. The goal was to get EVERY employee to try building something with AI, regardless of technical background. Tech/Product teams are naturally more advanced. Ops/Finance teams attempting anything is a WIN.
+
+Data: ${totalEval} submissions evaluated. ${qualifiedCount} qualified (${Math.round(qualifiedCount/totalEval*100)}%). Avg AI score: ${avgAI}/5.
+
+Function breakdown:
+${fnExamples}
+
+Frame your insights with GROWTH MINDSET:
+- Celebrate participation and effort, not just technical excellence
+- "Gaps" = "Opportunities to grow" — never negative
+- Tech/Product = "Early Adopters & Benchmarks" (expected to lead)
+- Ops/Finance/TAF = "Rising Stars" (celebrate any attempt as a win)
+- Acknowledge that documentation quality ≠ tool quality
+- Focus on cultural momentum, not performance gaps
+
+Return ONLY valid JSON, ALL text under 120 chars, arrays max 3 items:
+{"company_summary":"2 sentences celebrating momentum","company_strengths":["s1","s2","s3"],"company_opportunities":["o1","o2","o3"],"company_recommendations":["r1","r2","r3"],"overall_ai_maturity":"Emerging|Developing|Advancing|Leading","maturity_note":"1 sentence context","functions":[{"name":"fn","submission_count":0,"qualified_count":0,"avg_ai_score":0.0,"tier":"Early Adopter|Fast Follower|Rising Star","summary":"1-2 sentences","strengths":["s1","s2"],"growth_areas":["g1","g2"],"example_strong":"name - tool"}]}`
     try{
       const resp=await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({insightPrompt:prompt})})
       const data=await resp.json()
@@ -438,7 +538,7 @@ function InsightsTab({subs,results,insightData,setInsightData,counts,uniqueCount
     if(evaluatedCount>0&&evaluatedCount===subs.length&&!insightData&&!loading){generateInsights()}
   },[evaluatedCount,subs.length])
 
-  const MC={'Beginner':{bg:'#fee2e2',color:'#991b1b'},'Developing':{bg:'#fef3c7',color:'#854d0e'},'Intermediate':{bg:'#dbeafe',color:'#1e40af'},'Advanced':{bg:'#dcfce7',color:'#15803d'}}
+  const MC={'Beginner':{bg:'#fee2e2',color:'#991b1b'},'Emerging':{bg:'#fee2e2',color:'#991b1b'},'Developing':{bg:'#fef3c7',color:'#854d0e'},'Intermediate':{bg:'#dbeafe',color:'#1e40af'},'Advancing':{bg:'#dbeafe',color:'#1e40af'},'Advanced':{bg:'#dcfce7',color:'#15803d'},'Leading':{bg:'#dcfce7',color:'#15803d'}}
   return(
     <div style={{padding:'16px 28px 40px'}}>
       <div style={{background:'white',border:`1px solid ${BRAND.border}`,borderRadius:14,padding:'20px 24px',marginBottom:20,boxShadow:'0 2px 8px rgba(27,43,107,0.06)'}}>
@@ -465,7 +565,7 @@ function InsightsTab({subs,results,insightData,setInsightData,counts,uniqueCount
             </div>
             <p style={{fontSize:13,color:'#444',lineHeight:1.7,marginBottom:16}}>{insightData.company_summary}</p>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14}}>
-              {[['💪 Strengths',insightData.company_strengths,'#dcfce7','#166534'],['🔍 Gaps',insightData.company_gaps,'#fef3c7','#854d0e'],['🚀 Recommendations',insightData.company_recommendations,'#dbeafe','#1e40af']].map(([title,items,bg,color])=>(
+              {[['💪 Strengths',insightData.company_strengths,'#dcfce7','#166534'],['🌱 Growth Opportunities',insightData.company_opportunities||insightData.company_gaps,'#fef3c7','#854d0e'],['🚀 Recommendations',insightData.company_recommendations,'#dbeafe','#1e40af']].map(([title,items,bg,color])=>(
                 <div key={title} style={{background:bg,borderRadius:10,padding:'14px 16px'}}>
                   <div style={{fontSize:12,fontWeight:800,color,marginBottom:8}}>{title}</div>
                   {(items||[]).map((item,idx)=><div key={idx} style={{fontSize:12,color:'#444',lineHeight:1.5,marginBottom:6,paddingLeft:8,borderLeft:`2px solid ${color}55`}}>{item}</div>)}
@@ -539,6 +639,47 @@ export default function Home(){
   const fileRef=useRef()
   const countdown=getDeadlineCountdown()
 
+  // Restore auth session on page refresh — load data first
+  useEffect(()=>{
+    const restore=async()=>{
+      try{
+        const wasAuthed=localStorage.getItem(STORAGE_KEY+'_authed')
+        if(wasAuthed!=='1')return
+        // Try server first
+        const serverData=await loadFromServer()
+        if(serverData?.subs?.length>0){
+          setSubs(serverData.subs)
+          setOriginalHeaders(serverData.hdrs||[])
+          setResults(serverData.res?.length===serverData.subs.length?serverData.res:new Array(serverData.subs.length).fill(null))
+          setFileName(serverData.fname||'')
+          if(serverData.resubmitStatus)setResubmitStatus(serverData.resubmitStatus)
+          if(serverData.manualOverrides)setManualOverrides(serverData.manualOverrides)
+          setScreen('main');return
+        }
+        // Fallback: localStorage
+        const savedSubs=localStorage.getItem(STORAGE_KEY+'_subs')
+        const savedHdrs=localStorage.getItem(STORAGE_KEY+'_hdrs')
+        if(savedSubs&&savedHdrs){
+          const parsedSubs=JSON.parse(savedSubs)
+          const parsedHdrs=JSON.parse(savedHdrs)
+          const savedRes=localStorage.getItem(STORAGE_KEY+'_res')
+          const parsedRes=savedRes?JSON.parse(savedRes):new Array(parsedSubs.length).fill(null)
+          if(parsedSubs.length>0){
+            setSubs(parsedSubs);setOriginalHeaders(parsedHdrs)
+            setResults(parsedRes.length===parsedSubs.length?parsedRes:new Array(parsedSubs.length).fill(null))
+            setFileName(localStorage.getItem(STORAGE_KEY+'_fname')||'')
+            setScreen('main');return
+          }
+        }
+        // No data found — clear auth flag
+        localStorage.removeItem(STORAGE_KEY+'_authed')
+      }catch(e){
+        localStorage.removeItem(STORAGE_KEY+'_authed')
+      }
+    }
+    restore()
+  },[])
+
   // Load persisted data on mount
   useEffect(()=>{
     try{const s=localStorage.getItem(STORAGE_KEY);if(s)setResubmitStatus(JSON.parse(s))}catch(e){}
@@ -608,6 +749,7 @@ export default function Home(){
           setFileName(serverData.fname||'')
           if(serverData.resubmitStatus) setResubmitStatus(serverData.resubmitStatus)
           if(serverData.manualOverrides) setManualOverrides(serverData.manualOverrides)
+          localStorage.setItem(STORAGE_KEY+'_authed','1')
           setScreen('main');return
         }
       }catch(e){}
@@ -623,7 +765,7 @@ export default function Home(){
           if(parsedSubs.length>0){
             setSubs(parsedSubs);setOriginalHeaders(parsedHdrs)
             setResults(parsedRes.length===parsedSubs.length?parsedRes:new Array(parsedSubs.length).fill(null))
-            setFileName(savedFname||'');setScreen('main');return
+            setFileName(savedFname||'');localStorage.setItem(STORAGE_KEY+'_authed','1');setScreen('main');return
           }
         }
       }catch(e){}
@@ -633,6 +775,7 @@ export default function Home(){
 
   function doLogout(){
     // Only clear auth state — keep data so next login restores dashboard
+    try{localStorage.removeItem(STORAGE_KEY+'_authed')}catch(e){}
     setScreen('login');setLoginUser('');setLoginPass('')
     setExpanded({});setActiveTab('submissions');setModalIdx(null)
   }
@@ -663,7 +806,7 @@ export default function Home(){
     }catch(e){}
     const matchedResults=newMapped.map(s=>prevFingerMap[makeFingerprint(s)]||null)
     setSubs(newMapped);setOriginalRows(newRaw);setOriginalHeaders(headers)
-    setResults(matchedResults);setExpanded({});setInsightData(null);setScreen('main')
+    setResults(matchedResults);setExpanded({});setInsightData(null);localStorage.setItem(STORAGE_KEY+'_authed','1');setScreen('main')
   }
 
   // Re-evaluate a single submission (for manual review marking)
@@ -750,7 +893,7 @@ export default function Home(){
       if(olderNotQual&&primary.i>Math.min(...others.map(x=>x.i)))isResubmission.add(primary.i)
     })
     return{primaryIndexes,othersByPrimary,isResubmission,byEmail}
-  },[subs,results,manualOverrides])
+  },[subs,results])
 
   const{primaryIndexes,othersByPrimary,isResubmission}=dedupedData
 
@@ -1017,7 +1160,7 @@ export default function Home(){
                             </div>
                             <div style={{display:'flex',gap:10,marginTop:12}}>
                               <button onClick={e=>{e.stopPropagation();setManualOverride(i,'qualified','')}} style={{background:'#16a34a',color:'white',border:'none',borderRadius:8,padding:'8px 18px',fontSize:12,fontWeight:800,cursor:'pointer'}}>✅ Mark as Qualified</button>
-                              <button onClick={e=>{e.stopPropagation();setManualOverride(i,'not_qualified',r?.action||'Please provide complete submission with text descriptions. Resubmit by 1 June 2026 via https://bit.ly/AstroPersonalAI')}} style={{background:'#dc2626',color:'white',border:'none',borderRadius:8,padding:'8px 18px',fontSize:12,fontWeight:800,cursor:'pointer'}}>❌ Mark as Not Qualified</button>
+                              <button onClick={e=>{e.stopPropagation();setManualOverride(i,'not_qualified',r?.action||'Please provide complete submission with text descriptions. Resubmit by 4 June 2026 via https://bit.ly/AstroPersonalAI')}} style={{background:'#dc2626',color:'white',border:'none',borderRadius:8,padding:'8px 18px',fontSize:12,fontWeight:800,cursor:'pointer'}}>❌ Mark as Not Qualified</button>
                             </div>
                           </div>
                         )}
