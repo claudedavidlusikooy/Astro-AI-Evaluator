@@ -624,6 +624,7 @@ export default function Home(){
   const[search,setSearch]=useState('')
   const[drag,setDrag]=useState(false)
   const[running,setRunning]=useState(false)
+  const stopRef=useRef(false) // set to true to abort eval loop
   const[progress,setProgress]=useState({done:0,total:0})
   const[expanded,setExpanded]=useState({})
   const[expandedSummary,setExpandedSummary]=useState({})
@@ -833,6 +834,7 @@ export default function Home(){
 
   async function runEval(evalAll=false){
     if(running)return
+    stopRef.current=false
     setRunning(true)
     if(evalAll)setReEvaluated({})
     const newRes=evalAll?new Array(subs.length).fill(null):[...results]
@@ -840,6 +842,7 @@ export default function Home(){
     let done=newRes.filter(r=>r).length
     setProgress({done,total:subs.length})
     for(let batch=0;batch<toEval.length;batch+=3){
+      if(stopRef.current)break
       const chunk=toEval.slice(batch,Math.min(batch+3,toEval.length))
       await Promise.all(chunk.map(async({s,i})=>{
         try{
@@ -1037,7 +1040,7 @@ export default function Home(){
               ↺ Evaluate All
             </button>
           </>}
-          {running&&<button disabled style={{background:'#e2e8f0',color:BRAND.textMuted,border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'not-allowed'}}>⏳ Evaluating…</button>}
+          {running&&<button onClick={()=>{stopRef.current=true;setRunning(false)}} style={{background:'#dc2626',color:'white',border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'pointer'}}>⏹ Stop</button>}
         </div>
       </div>
 
