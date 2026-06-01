@@ -622,6 +622,9 @@ export default function Home(){
   const[originalHeaders,setOriginalHeaders]=useState([])
   const[filter,setFilter]=useState('all')
   const[search,setSearch]=useState('')
+  const[sortBy,setSortBy]=useState('default') // default|ai_asc|ai_desc|name_az|function_az|verdict
+  const[filterPurpose,setFilterPurpose]=useState('all') // all|Work|Personal
+  const[filterAIScore,setFilterAIScore]=useState('all') // all|1|2|3|4|5|low|high
   const[drag,setDrag]=useState(false)
   const[running,setRunning]=useState(false)
   const stopRef=useRef(false) // set to true to abort eval loop
@@ -732,7 +735,7 @@ export default function Home(){
   }
 
   // Reset to page 1 when filter/search/pageSize changes
-  useEffect(()=>{setPage(0)},[filter,search,pageSize])
+  useEffect(()=>{setPage(0)},[filter,search,pageSize,sortBy,filterPurpose,filterAIScore])
 
   useEffect(()=>{setPage(0)},[filter,search,pageSize])
 
@@ -909,13 +912,32 @@ export default function Home(){
   const uniqueCount=primaryIndexes.size
   const newCount=Array.from(primaryIndexes).filter(i=>!results[i]).length
 
-  const visible=useMemo(()=>subs.filter((s,i)=>{
-    if(!primaryIndexes.has(i))return false
-    const v=manualOverrides[i]?.verdict||calcVerdict(results[i])
-    if(filter!=='all'&&v!==filter)return false
-    if(search)return(getName(s.email)+s.email+s.dept+s.tool_name).toLowerCase().includes(search.toLowerCase())
-    return true
-  }),[subs,results,filter,search,primaryIndexes,manualOverrides])
+  const visible=useMemo(()=>{
+    let arr=subs.filter((s,i)=>{
+      if(!primaryIndexes.has(i))return false
+      const v=manualOverrides[i]?.verdict||calcVerdict(results[i])
+      if(filter!=='all'&&v!==filter)return false
+      if(filterPurpose!=='all'&&s.purpose!==filterPurpose)return false
+      const aiScore=results[i]?.ai_score||0
+      if(filterAIScore==='low'&&aiScore>2)return false
+      if(filterAIScore==='high'&&aiScore<4)return false
+      if(filterAIScore!=='all'&&filterAIScore!=='low'&&filterAIScore!=='high'&&aiScore!==Number(filterAIScore))return false
+      if(search){const q=search.toLowerCase();return(getName(s.email)+s.email+s.dept+s.tool_name).toLowerCase().includes(q)}
+      return true
+    })
+    // Sort
+    if(sortBy==='ai_desc')arr.sort((a,b)=>(results[subs.indexOf(b)]?.ai_score||0)-(results[subs.indexOf(a)]?.ai_score||0))
+    else if(sortBy==='ai_asc')arr.sort((a,b)=>(results[subs.indexOf(a)]?.ai_score||0)-(results[subs.indexOf(b)]?.ai_score||0))
+    else if(sortBy==='name_az')arr.sort((a,b)=>getName(a.email).localeCompare(getName(b.email)))
+    else if(sortBy==='function_az')arr.sort((a,b)=>(a.dept||'').localeCompare(b.dept||''))
+    else if(sortBy==='verdict')arr.sort((a,b)=>{
+      const order={qualified:0,manual_review:1,not_qualified:2,pending:3}
+      const va=manualOverrides[subs.indexOf(a)]?.verdict||calcVerdict(results[subs.indexOf(a)])
+      const vb=manualOverrides[subs.indexOf(b)]?.verdict||calcVerdict(results[subs.indexOf(b)])
+      return(order[va]??3)-(order[vb]??3)
+    })
+    return arr
+  },[subs,results,filter,search,filterPurpose,filterAIScore,sortBy,primaryIndexes,manualOverrides])
   const totalPages=Math.ceil(visible.length/pageSize)
   const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
 
@@ -1073,6 +1095,42 @@ export default function Home(){
             ].map(f=>(
               <button key={f.val} onClick={()=>setFilter(f.val)} style={{border:`1.5px solid ${filter===f.val?(f.highlight?'#fb923c':BRAND.blue):f.highlight?'#fed7aa':BRAND.border}`,background:filter===f.val?(f.highlight?'#fb923c':BRAND.blue):'white',padding:'5px 14px',borderRadius:20,fontSize:12,cursor:'pointer',color:filter===f.val?'white':f.highlight?'#c2410c':BRAND.textMuted,fontWeight:filter===f.val?700:f.highlight?700:400}}>{f.label}</button>
             ))}
+          </div>
+
+          {/* Sort + Additional Filters */}
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',padding:'4px 0 12px'}}>
+            <select value={sortBy} onChange={e=>setSortBy(e.target.value)}
+              style={{border:`1px solid ${BRAND.border}`,borderRadius:8,padding:'5px 10px',fontSize:12,color:BRAND.navy,background:'white',cursor:'pointer',fontWeight:sortBy!=='default'?700:400}}>
+              <option value="default">Sort: Default</option>
+              <option value="ai_desc">AI ★ High → Low</option>
+              <option value="ai_asc">AI ★ Low → High</option>
+              <option value="name_az">Name A → Z</option>
+              <option value="function_az">Function A → Z</option>
+              <option value="verdict">Verdict</option>
+            </select>
+            <select value={filterPurpose} onChange={e=>setFilterPurpose(e.target.value)}
+              style={{border:`1px solid ${filterPurpose!=='all'?BRAND.blue:BRAND.border}`,borderRadius:8,padding:'5px 10px',fontSize:12,color:filterPurpose!=='all'?BRAND.blue:BRAND.navy,background:'white',cursor:'pointer',fontWeight:filterPurpose!=='all'?700:400}}>
+              <option value="all">Purpose: All</option>
+              <option value="Work">Work</option>
+              <option value="Personal">Personal</option>
+            </select>
+            <select value={filterAIScore} onChange={e=>setFilterAIScore(e.target.value)}
+              style={{border:`1px solid ${filterAIScore!=='all'?BRAND.blue:BRAND.border}`,borderRadius:8,padding:'5px 10px',fontSize:12,color:filterAIScore!=='all'?BRAND.blue:BRAND.navy,background:'white',cursor:'pointer',fontWeight:filterAIScore!=='all'?700:400}}>
+              <option value="all">AI ★: All</option>
+              <option value="high">★★★★+ (High)</option>
+              <option value="low">★★ or less (Low)</option>
+              <option value="5">★★★★★ 5</option>
+              <option value="4">★★★★ 4</option>
+              <option value="3">★★★ 3</option>
+              <option value="2">★★ 2</option>
+              <option value="1">★ 1</option>
+            </select>
+            {(sortBy!=='default'||filterPurpose!=='all'||filterAIScore!=='all')&&(
+              <button onClick={()=>{setSortBy('default');setFilterPurpose('all');setFilterAIScore('all')}}
+                style={{border:`1px solid ${BRAND.border}`,borderRadius:8,padding:'5px 10px',fontSize:11,color:BRAND.textMuted,background:'white',cursor:'pointer'}}>
+                ✕ Reset
+              </button>
+            )}
           </div>
 
           <table style={{width:'100%',borderCollapse:'collapse',background:'white',borderRadius:12,overflow:'hidden',border:`1px solid ${BRAND.border}`,fontSize:13,boxShadow:'0 2px 8px rgba(27,43,107,0.07)'}}>
