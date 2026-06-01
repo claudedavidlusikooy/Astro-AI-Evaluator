@@ -1,23 +1,43 @@
 import Anthropic from '@anthropic-ai/sdk'
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-// Remove chars that break JSON serialization (fixes emoji/special chars in submissions)
 function sanitize(val) {
   if (!val) return ''
-  // Remove surrogate chars and null bytes
   return String(val).replace(/[\uD800-\uDFFF]/g, '').replace(/\u0000/g, '')
+}
+
+// Detect tool complexity from submission fields
+function getToolComplexity(s) {
+  const how = s.how.toLowerCase()
+  const tool = s.tool_name.toLowerCase()
+  const deployed = s.deployed.toLowerCase()
+
+  if (how.includes('chrome extension') || how.includes('browser extension') ||
+      how.includes('manifest') || tool.includes('extension')) return 'extension'
+  if (how.includes('telegram') || how.includes('discord bot') ||
+      how.includes('whatsapp bot')) return 'bot'
+  if (how.includes(' cli') || how.includes('command line') ||
+      how.includes('ai agent') || how.includes('automation script')) return 'cli_agent'
+  if (s.deployed.startsWith('http') && !deployed.includes('localhost') &&
+      !deployed.includes('local') && !['chatgpt.com','suno.com','claude.ai'].some(x => deployed.includes(x)))
+    return 'deployed'
+  if (s.html_file.includes('drive.google') ||
+      (s.html_file.startsWith('http') && !s.html_file.includes('chatgpt'))) return 'html'
+  if (how.includes('appsheet') || how.includes('n8n') ||
+      how.includes('streamlit') || how.includes('glide')) return 'nocode'
+  return 'basic'
 }
 
 export async function POST(request) {
   try {
     const body = await request.json()
 
-    // Insights mode
+    // ── Insights mode ──────────────────────────────────────────────
     if (body.insightPrompt) {
       const msg = await client.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 4000,
-        messages: [{ role: 'user', content: body.insightPrompt + '\n\nIMPORTANT: Keep ALL text fields under 120 characters. Return valid JSON only, no markdown.' }]
+        messages: [{ role: 'user', content: sanitize(body.insightPrompt) + '\n\nIMPORTANT: Keep ALL text fields under 120 characters. Return valid JSON only, no markdown.' }]
       })
       const raw = msg.content[0].text.trim()
       const jsonMatch = raw.match(/\{[\s\S]*\}/)
@@ -28,7 +48,7 @@ export async function POST(request) {
     const s = body.submission
     if (!s) return Response.json({ error: 'No submission provided' }, { status: 400 })
 
-    // Sanitize all text fields
+    // Sanitize all fields
     s.problem   = sanitize(s.problem)
     s.how       = sanitize(s.how)
     s.prompt    = sanitize(s.prompt)
@@ -38,74 +58,78 @@ export async function POST(request) {
     s.demo      = sanitize(s.demo)
     s.purpose   = sanitize(s.purpose)
 
-    const howLower  = s.how.toLowerCase()
-    const toolLower = s.tool_name.toLowerCase()
-    const deployedVal = s.deployed
-
-    const isBrowserExtension = howLower.includes('chrome extension') || howLower.includes('browser extension') || howLower.includes('manifest') || howLower.includes('content script') || toolLower.includes('extension')
-    const isCLIorAgent = howLower.includes(' cli') || howLower.includes('command line') || howLower.includes('terminal') || howLower.includes('ai agent') || (howLower.includes('automation') && (howLower.includes('android') || howLower.includes('ios') || howLower.includes('test')))
-    const isTelegramBot = howLower.includes('telegram') || howLower.includes('discord bot') || howLower.includes('whatsapp bot')
-    const isLocalServer = deployedVal.toLowerCase().includes('local') || deployedVal.toLowerCase().includes('localhost') || deployedVal.startsWith('file://')
-    const isNonHTMLTool = isBrowserExtension || isCLIorAgent || isTelegramBot
-    const hasDemo = !!(s.demo && s.demo.includes('drive.google'))
-
+    const complexity = getToolComplexity(s)
+    const isComplex = ['extension','bot','cli_agent','deployed'].includes(complexity)
+    const hasAnyOutput = s.html_file.length > 3 || s.deployed.length > 3 || (s.demo && s.demo.includes('drive.google'))
     const probIsLinkOnly = !!(s.problem && s.problem.trim().startsWith('http') && !s.problem.trim().includes(' '))
     const howIsLinkOnly  = !!(s.how && s.how.trim().startsWith('http') && !s.how.trim().includes(' '))
 
-    const hasHtmlFile = s.html_file.includes('drive.google') || (s.html_file.startsWith('http') && !s.html_file.includes('chatgpt') && !s.html_file.includes('claude.ai'))
-    const hasDeployed = deployedVal.length > 3 && deployedVal !== '-' && deployedVal.startsWith('http') && !isLocalServer && !['chatgpt.com','suno.com','play.google','claude.ai'].some(x => deployedVal.includes(x))
-    const hasDemoOnly = !hasHtmlFile && !hasDeployed && hasDemo
+    const prompt = `You are evaluating submissions for Astro's Personal AI Challenge.
 
-    const needsManualReview =
-      ((probIsLinkOnly || howIsLinkOnly) && (hasHtmlFile || hasDeployed || hasDemo)) ||
-      (hasDemoOnly && !isNonHTMLTool) ||
-      (isLocalServer && hasDemo)
+SPIRIT OF THIS CHALLENGE: Cultural change — we want EVERYONE to try AI, regardless of tech background.
+This is NOT a competition. Simple tools are as valid as complex ones.
+The goal: did they CREATE something new using AI?
 
-    const prompt = `You are evaluating a submission for Astro's Personal AI Challenge.
-Output does NOT have to be HTML — CLI tools, browser extensions, bots, scripts, and agents are all valid.
+CRITICAL PHILOSOPHY:
+- Short description ≠ vague. "Track operator work time" is FULL intent. Brevity is OK.
+- Empty prompt field ≠ didn't use AI. They may not know how to document prompts.
+- GDrive link = valid output. Treat same as deployed URL.
+- Benefit of the doubt ALWAYS goes to the submitter.
+- NOT_QUALIFIED bar is VERY HIGH — only for truly empty submissions.
 
 Return ONLY valid JSON, no markdown:
-{"intent":"full|partial|none","intent_reason":"max 100 chars","prompt":"full|partial|none","prompt_reason":"max 100 chars","html":"full|partial|none","html_reason":"max 100 chars","verdict":"qualified|manual_review|not_qualified","summary":"2-3 sentences max 250 chars","action":"fix instructions or empty string","ai_score":3,"ai_score_reason":"max 100 chars"}
+{"intent":"full|partial|none","intent_reason":"max 100 chars","prompt":"full|partial|none","prompt_reason":"max 100 chars","html":"full|partial|none","html_reason":"max 100 chars","verdict":"qualified|manual_review|not_qualified","summary":"2-3 sentences max 250 chars","action":"empty if qualified, else specific fix","ai_score":3,"ai_score_reason":"max 100 chars"}
 
-=== INTENT ===
-full = specific problem stated, even if short — CONCISE IS NOT VAGUE. "Record operator work time" = full.
-partial = genuinely vague, no specifics
-none = empty, "-", or URL-only field${probIsLinkOnly ? '\nWARNING: Problem field is URL-only — score none' : ''}
+=== INTENT (Did they identify a problem to solve?) ===
+full = ANY specific problem mentioned, even 1 sentence. "Biar gak lupa jadwal" = full. Short = OK.
+partial = genuinely impossible to understand what they're trying to solve
+none = completely empty or just "-"
+${probIsLinkOnly ? 'NOTE: Problem field contains only a URL — this is likely a documentation issue, score partial not none unless truly empty' : ''}
 
-=== PROMPT (AI Usage Evidence) ===
-full = any real AI usage evidence: good prompt, conversation link, numbered steps, OR sophisticated tool implies iteration
-partial = minimal but something exists
-none = empty, "-", zero evidence
+=== PROMPT (Did they use AI to build it?) ===
+full = ANY evidence of AI usage: prompt text (any length), conversation link, "I used Claude/ChatGPT to...", 
+       OR tool is complex enough (${isComplex ? 'THIS TOOL IS COMPLEX — score full even with minimal prompt evidence' : 'deployed app, extension, bot = implied AI iteration'})
+partial = something exists but very minimal
+none = absolutely zero evidence of AI involvement — completely empty field
+${howIsLinkOnly ? 'NOTE: How field contains only a URL — treat as partial at minimum, likely has context at that link' : ''}
 
-=== HTML/APP ===
-full = HTML on Drive, deployed URL (vercel/railway/streamlit/github.io/script.google.com/netlify), browser extension + demo${isBrowserExtension ? ' [EXTENSION: score full]' : ''}, CLI/agent tool${isCLIorAgent ? ' [CLI/AGENT: score full]' : ''}, bot${isTelegramBot ? ' [BOT: score full]' : ''}
-partial = local server + demo, demo-only screenshot/video, AppSheet/n8n + demo
-none = absolutely nothing
+=== HTML/APP (Did they make something?) ===
+full = ANY working output: HTML file, deployed URL, GDrive link (VALID — treat same as deployed), 
+       extension, bot, AppSheet, n8n, Streamlit, script — ANYTHING THAT EXISTS
+partial = demo/screenshot only, local server with demo
+none = absolutely nothing — no file, no link, no demo, truly empty
+NOTE: GDrive links are FULL — this is a form limitation, not submitter's fault
 
 === VERDICT ===
-qualified = 2+ full AND zero none
-manual_review = use INSTEAD of not_qualified when tool likely exists but can't auto-verify: URL-only descriptions, demo-only, local server + demo
-not_qualified = clearly missing critical components
+qualified = 2+ full AND zero none — when in doubt, qualify
+manual_review = has some evidence but needs human eyes — PREFER this over not_qualified
+not_qualified = ONLY when all three are none/empty. Extremely rare.
 
-action: empty "" if qualified; else specific fix + "resubmit by 1 June 2026 via https://bit.ly/AstroPersonalAI"
-ai_score 1-5: 5=exceptional; 4=good iteration; 3=adequate; 2=simple; 1=barely used
+=== AI SCORE (1-5) ===
+5 = deployed app OR extension OR bot OR agent — complex tool showing real AI mastery
+4 = working HTML + good prompt evidence OR nocode tool (AppSheet/n8n) + deployed
+3 = working output + some prompt evidence  
+2 = basic output, minimal AI evidence
+1 = barely any evidence of AI use
+${isComplex ? `BOOST: This appears to be a ${complexity} — score at least 4` : ''}
+
+action: "" if qualified. If not qualified: specific actionable fix only.
 
 SUBMISSION:
 Tool: ${s.tool_name}
-Type: ${isBrowserExtension?'Browser Extension':isCLIorAgent?'CLI/Agent':isTelegramBot?'Bot':'Standard'}
+Complexity type: ${complexity}
 Purpose: ${s.purpose}
-Problem: ${probIsLinkOnly?`[URL ONLY: ${s.problem}]`:s.problem.substring(0,300)}
-How it works: ${howIsLinkOnly?`[URL ONLY: ${s.how}]`:s.how.substring(0,300)}
-Prompt (first 1200 chars): ${s.prompt.substring(0,1200)}
-HTML file: ${hasHtmlFile?s.html_file:'NOT UPLOADED'}
-Deployed: ${hasDeployed?deployedVal:'none'}
-Has demo: ${hasDemo?'YES: '+s.demo:'no'}
-Local server: ${isLocalServer?'YES':'no'}
-Needs manual review: ${needsManualReview?'YES':'no'}`
+Problem: ${probIsLinkOnly ? `[URL: ${s.problem}]` : s.problem.substring(0, 400)}
+How it works: ${howIsLinkOnly ? `[URL: ${s.how}]` : s.how.substring(0, 400)}
+Prompt evidence (first 1500 chars): ${s.prompt.substring(0, 1500)}
+HTML/File: ${s.html_file || 'NOT PROVIDED'}
+Deployed URL: ${s.deployed || 'none'}
+Demo/Screenshot: ${s.demo || 'none'}
+Has any output: ${hasAnyOutput ? 'YES' : 'NO'}`
 
     const msg = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 600,
+      max_tokens: 700,
       messages: [{ role: 'user', content: prompt }]
     })
 
@@ -114,21 +138,41 @@ Needs manual review: ${needsManualReview?'YES':'no'}`
     if (!jsonMatch) throw new Error('Invalid response format')
     const result = JSON.parse(jsonMatch[0])
 
-    // Safety nets
-    if (needsManualReview && result.verdict === 'not_qualified') {
+    // Safety nets — enforce philosophy
+    // 1. If has any output, never score html as none
+    if (hasAnyOutput && result.html === 'none') {
+      result.html = 'partial'
+      result.html_reason = 'Has output — bumped from none'
+    }
+
+    // 2. Complex tools get prompt boost
+    if (isComplex && result.prompt === 'none' && s.prompt.length > 10) {
+      result.prompt = 'partial'
+      result.prompt_reason = `${complexity} tool implies AI usage`
+    }
+
+    // 3. Never not_qualified if has any output
+    if (hasAnyOutput && result.verdict === 'not_qualified') {
       result.verdict = 'manual_review'
-      if (!result.action) result.action = 'People team: please review the external document or demo link. If adequate, mark as Qualified. Otherwise mark as Not Qualified.'
+      result.action = 'Has output — please review manually. Mark as Qualified if tool is valid.'
     }
-    if (result.verdict === 'not_qualified' && (!result.action || !result.action.trim())) {
-      const missing = []
-      if (result.intent !== 'full') missing.push('provide a clear written problem statement')
-      if (result.prompt !== 'full') missing.push('show your AI prompts or conversation')
-      if (result.html !== 'full') missing.push('upload your tool or provide a working link/demo')
-      result.action = `Please ${missing.join(', ')}. Resubmit by 1 June 2026 via https://bit.ly/AstroPersonalAI`
-    }
+
+    // 4. Force qualified if scores qualify
     const fulls = [result.intent, result.prompt, result.html].filter(x => x === 'full').length
     const nones = [result.intent, result.prompt, result.html].filter(x => x === 'none').length
-    if (fulls >= 2 && nones === 0) { result.verdict = 'qualified'; result.action = '' }
+    if (fulls >= 2 && nones === 0) {
+      result.verdict = 'qualified'
+      result.action = ''
+    }
+
+    // 5. Force action for not_qualified
+    if (result.verdict === 'not_qualified' && (!result.action || !result.action.trim())) {
+      const missing = []
+      if (result.intent === 'none') missing.push('describe the problem your tool solves')
+      if (result.prompt === 'none') missing.push('share your AI prompts or conversation link')
+      if (result.html === 'none') missing.push('upload your tool file or provide a working link')
+      result.action = `Please ${missing.join(', ')}. Resubmit by 4 June 2026 via https://bit.ly/AstroPersonalAI`
+    }
 
     return Response.json({ result })
   } catch (err) {
