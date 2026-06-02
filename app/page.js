@@ -165,6 +165,15 @@ function makeGmailLink(s,r,overrideAction){
   return`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(s.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 }
 
+function makeGmailLinkQualified(s,r){
+  const name=getName(s.email)
+  const enhancement=r?.enhancement||'Keep building and experimenting with AI!'
+  const subject=`Astro Personal AI Challenge — Congratulations, You Qualified! 🎉`
+  const body=`Hi ${name},\n\nCongratulations! 🎉 Your submission for Astro's Personal AI Challenge has been reviewed and you're officially QUALIFIED!\n\n🛠️ YOUR TOOL: ${s.tool_name}\n\n📋 WHAT WE LOVED\n${r?.summary||''}\n\n📊 YOUR SCORES\n• Clear Intent: ${r?.intent||'-'}\n• AI Usage: ${r?.prompt||'-'}\n• Working Output: ${r?.html||'-'}\n• AI Implementation Score: ${r?.ai_score||'-'}/5 ★\n\n💡 IDEAS TO EXPLORE FURTHER\n${enhancement}\n\nThank you for embracing AI and contributing to Astro's culture of innovation. Keep building!\n\nBest,\nPeople Team · Astro`
+  return`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(s.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+}
+
+
 // ── Score UI ───────────────────────────────────────────────
 const SS={full:{bg:'#dcfce7',color:'#166534',icon:'✓'},partial:{bg:'#fef3c7',color:'#854d0e',icon:'~'},none:{bg:'#fee2e2',color:'#991b1b',icon:'✗'}}
 function ScorePill({score,label}){const c=SS[score]||SS.none;return<span style={{display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:700,margin:1,background:c.bg,color:c.color}}>{c.icon} {label}</span>}
@@ -588,7 +597,7 @@ Return ONLY valid JSON, ALL text under 120 chars, arrays max 3 items:
                     <p style={{fontSize:12,color:'#555',lineHeight:1.5,marginBottom:10}}>{fn.summary}</p>
                     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:fn.example_strong||fn.example_gap?8:0}}>
                       <div style={{background:'#f0fdf4',borderRadius:8,padding:'8px 10px'}}><div style={{fontSize:10,fontWeight:700,color:'#15803d',marginBottom:4}}>💪 Strengths</div>{(fn.strengths||[]).map((s,idx)=><div key={idx} style={{fontSize:11,color:'#444',lineHeight:1.4,marginBottom:3}}>• {s}</div>)}</div>
-                      <div style={{background:'#fefce8',borderRadius:8,padding:'8px 10px'}}><div style={{fontSize:10,fontWeight:700,color:'#854d0e',marginBottom:4}}>🚀 Next Steps</div>{(fn.recommendations||[]).map((s,idx)=><div key={idx} style={{fontSize:11,color:'#444',lineHeight:1.4,marginBottom:3}}>• {s}</div>)}</div>
+                      <div style={{background:'#fefce8',borderRadius:8,padding:'8px 10px'}}><div style={{fontSize:10,fontWeight:700,color:'#854d0e',marginBottom:4}}>🚀 Next Steps</div>{(fn.growth_areas||fn.recommendations||[]).map((s,idx)=><div key={idx} style={{fontSize:11,color:'#444',lineHeight:1.4,marginBottom:3}}>• {s}</div>)}</div>
                     </div>
                     {(fn.example_strong||fn.example_gap)&&(
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
@@ -869,7 +878,6 @@ export default function Home(){
       const ov=manualOverrides[i]
       const v=ov?.verdict||calcVerdict(results[i])
       if(!results[i])return false
-      // Only email if explicitly not_qualified — exclude manual_review unless overridden to not_qualified
       if(v==='not_qualified')return true
       if(v==='manual_review'&&ov?.verdict==='not_qualified')return true
       return false
@@ -878,6 +886,19 @@ export default function Home(){
     const count=Math.min(notQ.length,20)
     if(notQ.length>20)alert(`Opening first 20 of ${notQ.length}`)
     notQ.slice(0,count).forEach((s,idx)=>{const i=subs.indexOf(s);const ov=manualOverrides[i];setTimeout(()=>window.open(makeGmailLink(s,results[i],ov?.action),'_blank'),idx*350)})
+  }
+
+  function openAllEmailsQualified(){
+    const qual=subs.filter((_,i)=>{
+      const ov=manualOverrides[i]
+      const v=ov?.verdict||calcVerdict(results[i])
+      if(!results[i])return false
+      return v==='qualified'
+    })
+    if(qual.length===0){alert('No qualified submissions to email.');return}
+    const count=Math.min(qual.length,20)
+    if(qual.length>20)alert(`Opening first 20 of ${qual.length} qualified submissions`)
+    qual.slice(0,count).forEach((s,idx)=>{const i=subs.indexOf(s);setTimeout(()=>window.open(makeGmailLinkQualified(s,results[i]),'_blank'),idx*350)})
   }
 
   // ── Deduplication ──────────────────────────────────────────
@@ -1020,7 +1041,8 @@ export default function Home(){
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, function…"
               style={{border:'1.5px solid rgba(255,255,255,0.5)',borderRadius:8,padding:'7px 12px',fontSize:12,outline:'none',width:210,background:'rgba(255,255,255,0.2)',color:'white',WebkitTextFillColor:'white'}}/>
             <button onClick={()=>exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus,manualOverrides)} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>⬇ Export Excel</button>
-            <button onClick={openAllEmails} style={{background:'rgba(59,130,246,0.3)',border:'1px solid rgba(59,130,246,0.5)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>✉️ Email All ({counts.not_qualified||0})</button>
+            <button onClick={openAllEmailsQualified} style={{background:'rgba(22,163,74,0.3)',border:'1px solid rgba(22,163,74,0.5)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>🎉 Email Qualified ({counts.qualified||0})</button>
+            <button onClick={openAllEmails} style={{background:'rgba(59,130,246,0.3)',border:'1px solid rgba(59,130,246,0.5)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>✉️ Email Not Qualified ({counts.not_qualified||0})</button>
             <button onClick={()=>setScreen('upload')} style={{background:'rgba(255,255,255,0.1)',border:'1px solid rgba(255,255,255,0.2)',color:'white',borderRadius:8,padding:'7px 12px',fontSize:12,cursor:'pointer'}}>↩ Change File</button>
           </>}
           <div style={{background:countdown.urgent?'rgba(220,50,50,0.3)':'rgba(255,255,255,0.15)',border:`1px solid ${countdown.urgent?'rgba(255,100,80,0.5)':'rgba(255,255,255,0.25)'}`,borderRadius:8,padding:'5px 10px',fontSize:11,color:'white',fontWeight:600,whiteSpace:'nowrap'}}>⏰ {countdown.text}</div>
@@ -1275,6 +1297,11 @@ export default function Home(){
                             <strong>🔧 Action Required:</strong> {override?.action||r?.action}
                           </div>
                         )}
+
+                        {r?.enhancement&&<div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:10,padding:'10px 14px',fontSize:12,color:'#166534',lineHeight:1.5,marginBottom:8}}>
+                          <strong>💡 Ideas to Explore Further:</strong> {r.enhancement}
+                        </div>}
+
 
                         <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',marginTop:8,marginBottom:others.length>0?12:0}}>
                           {htmlUp&&<a href={s.html_file} target="_blank" rel="noreferrer" style={{fontSize:11,color:BRAND.blue,textDecoration:'none',fontWeight:600}}>📁 HTML File</a>}
