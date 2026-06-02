@@ -96,7 +96,7 @@ INVALID submissions = pure text output: AI-generated documents, templates, email
 SPIRIT: Cultural change — everyone should TRY. Simple tools are as valid as complex ones. Short descriptions are OK. GDrive = valid output.
 
 Return ONLY valid JSON, no markdown:
-{"intent":"full|partial|none","intent_reason":"max 100 chars","prompt":"full|partial|none","prompt_reason":"max 100 chars","html":"full|partial|none","html_reason":"max 100 chars","verdict":"qualified|manual_review|not_qualified","summary":"2-3 sentences max 250 chars","action":"empty if qualified, else specific fix","ai_score":3,"ai_score_reason":"max 100 chars"}
+{"intent":"full|partial|none","intent_reason":"max 100 chars","prompt":"full|partial|none","prompt_reason":"max 100 chars","html":"full|partial|none","html_reason":"max 100 chars","verdict":"qualified|manual_review|not_qualified","summary":"2-3 sentences max 250 chars","action":"empty if qualified, else specific fix","ai_score":3,"ai_score_reason":"max 100 chars","enhancement":"1-2 concrete ideas to improve or expand this tool, starting with you could explore..."}
 
 === INTENT ===
 full = specific problem to solve, any length. "Track operator attendance" = full.
@@ -129,6 +129,15 @@ not_qualified = no output at all, OR clearly just asked AI to write something
 1 = barely any evidence
 ${isComplex ? `BOOST: ${complexity} — score minimum 4` : ''}
 ${pureText ? 'REDUCE: appears to be text output — score maximum 2' : ''}
+
+=== ENHANCEMENT ===
+Always provide 1-2 specific ideas to improve or expand the tool. Be encouraging and concrete.
+Start with "You could explore..." Examples:
+- "You could explore deploying this to Vercel so the whole team can access it"
+- "You could explore adding an export to PDF/Excel feature"
+- "You could explore integrating this with Slack for real-time notifications"
+- "You could explore adding user authentication so multiple team members can use it"
+Even for qualified submissions — everyone can improve further.
 
 SUBMISSION:
 Tool: ${s.tool_name}
