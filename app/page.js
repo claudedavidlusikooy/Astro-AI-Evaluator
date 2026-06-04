@@ -511,9 +511,14 @@ function InsightsTab({subs,results,insightData,setInsightData,counts,uniqueCount
     const qualifiedCount=Object.values(byFunction).flat().filter(x=>x.verdict==='qualified').length
     const totalEval=results.filter(r=>r).length
     const fnExamples=Object.entries(byFunction).map(([fn,items])=>{
-      const strong=items.filter(x=>x.verdict==='qualified'&&x.ai_score>=4).slice(0,2).map(x=>`${x.name}(${x.tool})`)
+      const qualItems=items.filter(x=>x.verdict==='qualified')
+      const qualCount=qualItems.length
+      const qualRate=items.length?Math.round(qualCount/items.length*100):0
+      const avgQualScore=qualItems.length?(qualItems.reduce((a,b)=>a+(b.ai_score||0),0)/qualItems.length).toFixed(1):'N/A'
+      const is100=qualRate===100?' [100% QUALIFIED — OUTSTANDING ADOPTION]':''
+      const strong=qualItems.filter(x=>x.ai_score>=4).slice(0,2).map(x=>`${x.name}(${x.tool})`)
       const weak=items.filter(x=>x.verdict==='not_qualified').slice(0,2).map(x=>`${x.name}(${x.tool})`)
-      return`${fn}(${items.length}subs,${items.filter(x=>x.verdict==='qualified').length}qual,avg${(items.reduce((a,b)=>a+(b.ai_score||0),0)/items.length).toFixed(1)}): strong=${strong.join(',')}, needsWork=${weak.join(',')}`
+      return`${fn}${is100}(${items.length}subs,${qualCount}qual/${qualRate}%,avgQualScore=${avgQualScore}): strong=${strong.join(',')}, needsWork=${weak.join(',')}`
     }).join('\n')
     const prompt=`You are an AI adoption analyst for Astro Technologies Indonesia.
 
@@ -525,6 +530,8 @@ Function breakdown:
 ${fnExamples}
 
 Frame your insights with GROWTH MINDSET:
+- Functions marked [100% QUALIFIED] = outstanding AI adoption — explicitly celebrate them
+- avg score shown is qualified-only average (more meaningful than all-submissions avg)
 - Celebrate participation and effort, not just technical excellence
 - "Gaps" = "Opportunities to grow" — never negative
 - Tech/Product = "Early Adopters & Benchmarks" (expected to lead)
@@ -634,6 +641,7 @@ export default function Home(){
   const[sortBy,setSortBy]=useState('default') // default|ai_asc|ai_desc|name_az|function_az|verdict
   const[filterPurpose,setFilterPurpose]=useState('all') // all|Work|Personal
   const[filterAIScore,setFilterAIScore]=useState('all') // all|1|2|3|4|5|low|high
+  const[filterFunction,setFilterFunction]=useState('all')
   const[drag,setDrag]=useState(false)
   const[running,setRunning]=useState(false)
   const stopRef=useRef(false) // set to true to abort eval loop
@@ -661,9 +669,20 @@ export default function Home(){
         // Try server first
         const serverData=await loadFromServer()
         if(serverData?.subs?.length>0){
+          // Merge server results with local localStorage — non-null wins, server preferred for same index
+          let mergedRes=serverData.res||[]
+          try{
+            const localRes=JSON.parse(localStorage.getItem(STORAGE_KEY+'_res')||'[]')
+            // If local has more results or newer evals, merge: prefer non-null, server wins on conflict
+            if(localRes.length>0){
+              mergedRes=mergedRes.map((sr,i)=>sr||localRes[i]||null)
+              // Also pick up any local results beyond server array length
+              for(let i=mergedRes.length;i<localRes.length;i++)mergedRes.push(localRes[i]||null)
+            }
+          }catch(e){}
           setSubs(serverData.subs)
           setOriginalHeaders(serverData.hdrs||[])
-          setResults(serverData.res?.length===serverData.subs.length?serverData.res:new Array(serverData.subs.length).fill(null))
+          setResults(mergedRes.length===serverData.subs.length?mergedRes:new Array(serverData.subs.length).fill(null))
           setFileName(serverData.fname||'')
           if(serverData.resubmitStatus)setResubmitStatus(serverData.resubmitStatus)
           if(serverData.manualOverrides)setManualOverrides(serverData.manualOverrides)
@@ -714,11 +733,34 @@ export default function Home(){
     }
   },[subs,originalHeaders,fileName])
 
-  // Sync to server — debounced 3s to avoid flood during batch eval
+  // Save on browser close/refresh — prevents data loss when user closes tab mid-eval
+  useEffect(()=>{
+    const handleBeforeUnload = ()=>{
+      if(subs.length>0&&results.some(r=>r)){
+        const payload=JSON.stringify({subs,res:results,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+        // Use sendBeacon for reliable delivery on page close
+        navigator.sendBeacon('/api/store',new Blob([payload],{type:'application/json'}))
+      }
+    }
+    window.addEventListener('beforeunload',handleBeforeUnload)
+    return()=>window.removeEventListener('beforeunload',handleBeforeUnload)
+  },[subs,results,originalHeaders,fileName,resubmitStatus,manualOverrides])
+
+  // Sync to server — debounced 3s, merge with existing server data to preserve concurrent edits
   useEffect(()=>{
     if(!subs.length||!results.some(r=>r))return
-    const timer=setTimeout(()=>{
-      saveToServer({subs,res:results,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+    const timer=setTimeout(async()=>{
+      try{
+        // Load current server state and merge — prevents overwriting teammate's work
+        const serverData=await loadFromServer()
+        let mergedRes=[...results]
+        if(serverData?.res?.length>0){
+          mergedRes=results.map((r,i)=>r||(serverData.res[i]||null))
+        }
+        saveToServer({subs,res:mergedRes,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+      }catch(e){
+        saveToServer({subs,res:results,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+      }
     },3000)
     return()=>clearTimeout(timer)
   },[results,resubmitStatus,manualOverrides])
@@ -744,7 +786,7 @@ export default function Home(){
   }
 
   // Reset to page 1 when filter/search/pageSize changes
-  useEffect(()=>{setPage(0)},[filter,search,pageSize,sortBy,filterPurpose,filterAIScore])
+  useEffect(()=>{setPage(0)},[filter,search,pageSize,sortBy,filterPurpose,filterAIScore,filterFunction])
 
   useEffect(()=>{setPage(0)},[filter,search,pageSize])
 
@@ -871,6 +913,19 @@ export default function Home(){
       if(batch+3<toEval.length)await sleep(300)
     }
     setRunning(false)
+    // Force immediate save after eval completes — don't wait for debounce
+    if(subs.length>0){
+      try{
+        const serverData=await loadFromServer()
+        let mergedRes=[...newRes]
+        if(serverData?.res?.length>0){
+          mergedRes=newRes.map((r,i)=>r||(serverData.res[i]||null))
+        }
+        await saveToServer({subs,res:mergedRes,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+      }catch(e){
+        await saveToServer({subs,res:newRes,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+      }
+    }
   }
 
   function openAllEmails(){
@@ -939,6 +994,7 @@ export default function Home(){
       const v=manualOverrides[i]?.verdict||calcVerdict(results[i])
       if(filter!=='all'&&v!==filter)return false
       if(filterPurpose!=='all'&&s.purpose!==filterPurpose)return false
+      if(filterFunction!=='all'&&(s.dept||'')!==filterFunction)return false
       const aiScore=results[i]?.ai_score||0
       if(filterAIScore==='low'&&aiScore>2)return false
       if(filterAIScore==='high'&&aiScore<4)return false
@@ -958,7 +1014,7 @@ export default function Home(){
       return(order[va]??3)-(order[vb]??3)
     })
     return arr
-  },[subs,results,filter,search,filterPurpose,filterAIScore,sortBy,primaryIndexes,manualOverrides])
+  },[subs,results,filter,search,filterPurpose,filterAIScore,filterFunction,sortBy,primaryIndexes,manualOverrides])
   const totalPages=Math.ceil(visible.length/pageSize)
   const visiblePage=visible.slice(page*pageSize,(page+1)*pageSize)
 
@@ -1147,8 +1203,15 @@ export default function Home(){
               <option value="2">★★ 2</option>
               <option value="1">★ 1</option>
             </select>
-            {(sortBy!=='default'||filterPurpose!=='all'||filterAIScore!=='all')&&(
-              <button onClick={()=>{setSortBy('default');setFilterPurpose('all');setFilterAIScore('all')}}
+            <select value={filterFunction} onChange={e=>setFilterFunction(e.target.value)}
+              style={{border:`1px solid ${filterFunction!=='all'?BRAND.blue:BRAND.border}`,borderRadius:8,padding:'5px 10px',fontSize:12,color:filterFunction!=='all'?BRAND.blue:BRAND.navy,background:'white',cursor:'pointer',fontWeight:filterFunction!=='all'?700:400}}>
+              <option value="all">Function: All</option>
+              {[...new Set(subs.map(s=>s.dept||'Unknown').filter(Boolean))].sort().map(fn=>(
+                <option key={fn} value={fn}>{fn}</option>
+              ))}
+            </select>
+            {(sortBy!=='default'||filterPurpose!=='all'||filterAIScore!=='all'||filterFunction!=='all')&&(
+              <button onClick={()=>{setSortBy('default');setFilterPurpose('all');setFilterAIScore('all');setFilterFunction('all')}}
                 style={{border:`1px solid ${BRAND.border}`,borderRadius:8,padding:'5px 10px',fontSize:11,color:BRAND.textMuted,background:'white',cursor:'pointer'}}>
                 ✕ Reset
               </button>
