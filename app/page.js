@@ -8,7 +8,7 @@ const BRAND = {
   navy:'#1B2B6B', blue:'#2B5CE6', lightBlue:'#5BB3F0',
   bgLight:'#F0F5FF', bgPage:'#EEF3FB', border:'#D0DCF5', textMuted:'#6B7BAD',
 }
-const AUTH = { username:'Astro.People', password:'@People2026' }
+const AUTH = { username:'Astro.People', password:'@People2026', viewerPassword:'@View2026' }
 const STORAGE_KEY = 'astro_eval_data'
 const DEADLINE = new Date('2026-06-04T23:59:59')
 
@@ -629,6 +629,7 @@ export default function Home(){
   const[showRocket,setShowRocket]=useState(false)
   const[loginUser,setLoginUser]=useState('')
   const[loginPass,setLoginPass]=useState('')
+  const[isViewer,setIsViewer]=useState(false)
   const[loginError,setLoginError]=useState('')
   const[fileData,setFileData]=useState(null)
   const[fileName,setFileName]=useState('')
@@ -792,7 +793,9 @@ export default function Home(){
 
   async function doLogin(e){
     e.preventDefault()
-    if(loginUser.trim()===AUTH.username&&loginPass===AUTH.password){
+    const isViewerLogin=loginUser.trim()===AUTH.username&&loginPass===AUTH.viewerPassword
+    if(loginUser.trim()===AUTH.username&&(loginPass===AUTH.password||isViewerLogin)){
+      setIsViewer(isViewerLogin)
       setLoginError('')
       // Try server first (shared across devices), fallback to localStorage
       try{
@@ -831,7 +834,7 @@ export default function Home(){
   function doLogout(){
     // Only clear auth state — keep data so next login restores dashboard
     try{localStorage.removeItem(STORAGE_KEY+'_authed')}catch(e){}
-    setScreen('login');setLoginUser('');setLoginPass('')
+    setIsViewer(false);setScreen('login');setLoginUser('');setLoginPass('')
     setExpanded({});setActiveTab('submissions');setModalIdx(null)
   }
 
@@ -1054,7 +1057,7 @@ export default function Home(){
   if(screen==='upload')return(
     <div style={{minHeight:'100vh',background:BRAND.bgPage,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
       <div style={{background:`linear-gradient(135deg,${BRAND.navy} 0%,${BRAND.blue} 100%)`,padding:'16px 32px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-        <div style={{display:'flex',alignItems:'center',gap:12}}><img src={MASCOT_BOXING} alt="" style={{width:40,height:40,objectFit:'contain'}}/><div><div style={{color:'white',fontWeight:800,fontSize:15}}>Personal AI Challenge</div><div style={{color:'rgba(255,255,255,0.6)',fontSize:11}}>Submission Evaluator · People Team</div></div></div>
+        <div style={{display:'flex',alignItems:'center',gap:12}}><img src={MASCOT_BOXING} alt="" style={{width:40,height:40,objectFit:'contain'}}/><div><div style={{color:'white',fontWeight:800,fontSize:15}}>Personal AI Challenge</div><div style={{color:'rgba(255,255,255,0.6)',fontSize:11}}>{isViewer?'Submission Evaluator · People Team 👁 View Only':'Submission Evaluator · People Team'}</div></div></div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           {subs.length>0&&<button onClick={()=>setScreen('main')} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'white',borderRadius:8,padding:'6px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>← Back to Dashboard</button>}
           <div style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.25)',borderRadius:8,padding:'5px 12px',fontSize:11,color:'white',fontWeight:600}}>⏰ {countdown.text}</div>
@@ -1097,9 +1100,9 @@ export default function Home(){
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, function…"
               style={{border:'1.5px solid rgba(255,255,255,0.5)',borderRadius:8,padding:'7px 12px',fontSize:12,outline:'none',width:210,background:'rgba(255,255,255,0.2)',color:'white',WebkitTextFillColor:'white'}}/>
             <button onClick={()=>exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus,manualOverrides)} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>⬇ Export Excel</button>
-            <button onClick={openAllEmailsQualified} style={{background:'rgba(22,163,74,0.3)',border:'1px solid rgba(22,163,74,0.5)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>🎉 Email Qualified ({counts.qualified||0})</button>
-            <button onClick={openAllEmails} style={{background:'rgba(59,130,246,0.3)',border:'1px solid rgba(59,130,246,0.5)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>✉️ Email Not Qualified ({counts.not_qualified||0})</button>
-            <button onClick={()=>setScreen('upload')} style={{background:'rgba(255,255,255,0.1)',border:'1px solid rgba(255,255,255,0.2)',color:'white',borderRadius:8,padding:'7px 12px',fontSize:12,cursor:'pointer'}}>↩ Change File</button>
+            {!isViewer&&<button onClick={openAllEmailsQualified} style={{background:'rgba(22,163,74,0.3)',border:'1px solid rgba(22,163,74,0.5)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>🎉 Email Qualified ({counts.qualified||0})</button>}
+            {!isViewer&&<button onClick={openAllEmails} style={{background:'rgba(59,130,246,0.3)',border:'1px solid rgba(59,130,246,0.5)',color:'white',borderRadius:8,padding:'7px 14px',fontSize:12,cursor:'pointer',fontWeight:600}}>✉️ Email Not Qualified ({counts.not_qualified||0})</button>}
+            {!isViewer&&<button onClick={()=>setScreen('upload')} style={{background:'rgba(255,255,255,0.1)',border:'1px solid rgba(255,255,255,0.2)',color:'white',borderRadius:8,padding:'7px 12px',fontSize:12,cursor:'pointer'}}>↩ Change File</button>}
           </>}
           <div style={{background:countdown.urgent?'rgba(220,50,50,0.3)':'rgba(255,255,255,0.15)',border:`1px solid ${countdown.urgent?'rgba(255,100,80,0.5)':'rgba(255,255,255,0.25)'}`,borderRadius:8,padding:'5px 10px',fontSize:11,color:'white',fontWeight:600,whiteSpace:'nowrap'}}>⏰ {countdown.text}</div>
           <button onClick={doLogout} style={{background:'rgba(220,50,50,0.3)',border:'1px solid rgba(255,100,80,0.5)',color:'white',borderRadius:8,padding:'7px 12px',fontSize:12,cursor:'pointer',fontWeight:600}}>Sign Out</button>
@@ -1124,13 +1127,13 @@ export default function Home(){
         ))}
         <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
           {running&&<div style={{display:'flex',alignItems:'center',gap:8}}><div style={{background:BRAND.border,borderRadius:10,height:6,width:140}}><div style={{background:`linear-gradient(90deg,${BRAND.lightBlue},${BRAND.blue})`,borderRadius:10,height:6,width:`${progress.total?Math.round(progress.done/progress.total*100):0}%`,transition:'width 0.3s'}}></div></div><span style={{fontSize:12,color:BRAND.textMuted,whiteSpace:'nowrap'}}>{progress.done}/{progress.total}</span></div>}
-          {!running&&Object.values(selected).some(v=>v)&&(
+          {!isViewer&&!running&&Object.values(selected).some(v=>v)&&(
             <button onClick={reEvalSelected}
               style={{background:'#7c3aed',color:'white',border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'pointer',whiteSpace:'nowrap'}}>
               ↺ Re-evaluate Selected ({Object.values(selected).filter(v=>v).length})
             </button>
           )}
-          {!running&&<>
+          {!isViewer&&!running&&<>
             <button onClick={()=>runEval(false)} disabled={newCount===0}
               style={{background:newCount===0?'#e2e8f0':`linear-gradient(135deg,${BRAND.navy},${BRAND.blue})`,color:newCount===0?BRAND.textMuted:'white',border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:newCount===0?'not-allowed':'pointer',whiteSpace:'nowrap'}}>
               {newCount>0?`▶ Evaluate ${newCount} New`:'✅ All Evaluated'}
@@ -1140,7 +1143,7 @@ export default function Home(){
               ↺ Evaluate All
             </button>
           </>}
-          {running&&<button onClick={()=>{stopRef.current=true;setRunning(false)}} style={{background:'#dc2626',color:'white',border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'pointer'}}>⏹ Stop</button>}
+          {!isViewer&&running&&<button onClick={()=>{stopRef.current=true;setRunning(false)}} style={{background:'#dc2626',color:'white',border:'none',borderRadius:10,padding:'10px 18px',fontSize:12,fontWeight:800,cursor:'pointer'}}>⏹ Stop</button>}
         </div>
       </div>
 
@@ -1371,9 +1374,9 @@ export default function Home(){
                           {deployed&&<a href={s.deployed} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#16a34a',textDecoration:'none',fontWeight:600}}>🚀 Live App</a>}
                           {s.demo?.startsWith('http')&&<a href={s.demo} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#7c3aed',textDecoration:'none',fontWeight:600}}>📹 Demo</a>}
                           {r&&verdict!=='qualified'&&<a href={makeGmailLink(s,r,override?.action)} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{padding:'5px 12px',fontSize:11,fontWeight:700,borderRadius:8,border:`1px solid ${BRAND.blue}`,background:'#eff6ff',color:BRAND.blue,textDecoration:'none'}}>✉️ Draft Email to {getName(s.email).split(' ')[0]}</a>}
-                          <button onClick={e=>{e.stopPropagation();reEvalOne(i)}} style={{padding:'5px 12px',fontSize:11,fontWeight:600,borderRadius:8,cursor:'pointer',border:`1px solid ${BRAND.border}`,background:'white',color:BRAND.textMuted}}>↺ Re-evaluate</button>
+{!isViewer&&                          <button onClick={e=>{e.stopPropagation();reEvalOne(i)}} style={{padding:'5px 12px',fontSize:11,fontWeight:600,borderRadius:8,cursor:'pointer',border:`1px solid ${BRAND.border}`,background:'white',color:BRAND.textMuted}}>↺ Re-evaluate</button>}
                           {/* Allow manual override from non-manual rows too */}
-                          {!isManual&&!override&&verdict==='not_qualified'&&(
+                          {!isViewer&&!isManual&&!override&&verdict==='not_qualified'&&(
                             <button onClick={e=>{e.stopPropagation();setManualOverride(i,'qualified','')}} style={{background:'none',border:'1px solid #16a34a',color:'#16a34a',borderRadius:8,padding:'4px 10px',fontSize:11,cursor:'pointer',fontWeight:600}}>✅ Override: Qualified</button>
                           )}
                           {!isManual&&!override&&verdict==='qualified'&&(
