@@ -135,7 +135,7 @@ function getDeadlineCountdown(){
 
 async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus,manualOverrides){
   const XLSX=await loadXLSX()
-  const newCols=['Verdict','Manual Override','Resubmit Status','Intent Score','Prompt Score','HTML Score','AI Score','HTML Uploaded','Flags','Summary','Action Required']
+  const newCols=['Verdict','Manual Override','Resubmit Status','Intent Score','Prompt Score','HTML Score','AI Score','HTML Uploaded','Flags','Summary','Action Required','AI Implementation Review']
   const headers=[...originalHeaders,...newCols]
   const VLABELS={qualified:'✅ Qualified',manual_review:'⚠️ Manual Review',not_qualified:'🔄 Not Qualified',pending:'Pending'}
   const data=subs.map((s,i)=>{
@@ -150,6 +150,7 @@ async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitSt
     const flags=[];if(looksLikeLinkOnly(s.problem))flags.push('Problem:link');if(looksLikeLinkOnly(s.how))flags.push('How:link');if(!hasHtmlFile(s)&&!hasDeployedLink(s)&&s.demo)flags.push('Demo only')
     row['Flags']=flags.join(';')||''
     row['Summary']=r?r.summary:'';row['Action Required']=override?.action||r?.action||''
+    row['AI Implementation Review']=r?.enhancement||''
     return row
   })
   const ws=XLSX.utils.json_to_sheet(data,{header:headers})
@@ -738,7 +739,7 @@ export default function Home(){
   useEffect(()=>{
     const handleBeforeUnload = ()=>{
       if(subs.length>0&&results.some(r=>r)){
-        const payload=JSON.stringify({subs,res:results,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+        const payload=JSON.stringify({res:results,resubmitStatus,manualOverrides})
         // Use sendBeacon for reliable delivery on page close
         navigator.sendBeacon('/api/store',new Blob([payload],{type:'application/json'}))
       }
@@ -758,9 +759,9 @@ export default function Home(){
         if(serverData?.res?.length>0){
           mergedRes=results.map((r,i)=>r||(serverData.res[i]||null))
         }
-        saveToServer({subs,res:mergedRes,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+        saveToServer({res:mergedRes,resubmitStatus,manualOverrides})
       }catch(e){
-        saveToServer({subs,res:results,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+        saveToServer({res:results,resubmitStatus,manualOverrides})
       }
     },3000)
     return()=>clearTimeout(timer)
@@ -865,6 +866,8 @@ export default function Home(){
     const matchedResults=newMapped.map(s=>prevFingerMap[makeFingerprint(s)]||null)
     setSubs(newMapped);setOriginalRows(newRaw);setOriginalHeaders(headers)
     setResults(matchedResults);setExpanded({});setInsightData(null);localStorage.setItem(STORAGE_KEY+'_authed','1');setScreen('main')
+    // Save subs to server (separate key — only changes on file upload)
+    saveToServer({subs:newMapped,hdrs:headers,fname:fileName})
   }
 
   // Re-evaluate a single submission (for manual review marking)
@@ -924,9 +927,9 @@ export default function Home(){
         if(serverData?.res?.length>0){
           mergedRes=newRes.map((r,i)=>r||(serverData.res[i]||null))
         }
-        await saveToServer({subs,res:mergedRes,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+        await saveToServer({res:mergedRes,resubmitStatus,manualOverrides})
       }catch(e){
-        await saveToServer({subs,res:newRes,hdrs:originalHeaders,fname:fileName,resubmitStatus,manualOverrides})
+        await saveToServer({res:newRes,resubmitStatus,manualOverrides})
       }
     }
   }
