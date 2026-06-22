@@ -135,7 +135,7 @@ function getDeadlineCountdown(){
 
 async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitStatus,manualOverrides){
   const XLSX=await loadXLSX()
-  const newCols=['Verdict','Manual Override','Resubmit Status','Intent Score','Prompt Score','HTML Score','AI Score','HTML Uploaded','Flags','Summary','Action Required','AI Implementation Review']
+  const newCols=['Verdict','Manual Override','Resubmit Status','Intent Score','Prompt Score','HTML Score','AI Score','AI Implementation Comment','HTML Uploaded','Flags','Summary','Action Required','AI Implementation Review']
   const headers=[...originalHeaders,...newCols]
   const VLABELS={qualified:'✅ Qualified',manual_review:'⚠️ Manual Review',not_qualified:'🔄 Not Qualified',pending:'Pending'}
   const data=subs.map((s,i)=>{
@@ -146,6 +146,7 @@ async function exportToXLSX(subs,results,originalRows,originalHeaders,resubmitSt
     row['Resubmit Status']=(['not_qualified','manual_review'].includes(override?.verdict||verdict))?({pending:'⏳ Pending',resubmitted:'📬 Resubmitted',confirmed:'✅ Confirmed'}[resubmitStatus[i]||'pending']||'⏳ Pending'):'—'
     row['Intent Score']=r?r.intent:'';row['Prompt Score']=r?r.prompt:'';row['HTML Score']=r?r.html:''
     row['AI Score']=r?`${r.ai_score}/5`:''
+    row['AI Implementation Comment']=r?.ai_score_reason||''
     row['HTML Uploaded']=hasHtmlFile(s)?'Yes':'No'
     const flags=[];if(looksLikeLinkOnly(s.problem))flags.push('Problem:link');if(looksLikeLinkOnly(s.how))flags.push('How:link');if(!hasHtmlFile(s)&&!hasDeployedLink(s)&&s.demo)flags.push('Demo only')
     row['Flags']=flags.join(';')||''
